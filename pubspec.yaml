@@ -33,6 +33,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter:
     sdk: flutter
+  flutter_svg: ^2.0.10+1
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
@@ -54,7 +55,41 @@ flutter:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
   assets:
-    - assets/mochi/png/
+    - assets/icons/png/chat.png
+    - assets/icons/png/home.png
+    - assets/icons/png/pencil.png
+    - assets/icons/png/settings.png
+    - assets/icons/svg/chat_svg.svg
+    - assets/icons/svg/home_svg.svg
+    - assets/icons/svg/pencil_svg.svg
+    - assets/icons/svg/settings_svg.svg
+    - assets/mochi/png/baby_mochi_crying.png
+    - assets/mochi/png/baby_mochi_happy.png
+    - assets/mochi/png/baby_mochi_normal.png
+    - assets/mochi/png/baby_mochi_sad.png
+    - assets/mochi/png/mochi_angry.png
+    - assets/mochi/png/mochi_confused.png
+    - assets/mochi/png/mochi_egg.png
+    - assets/mochi/png/mochi_happy.png
+    - assets/mochi/png/mochi_hungry.png
+    - assets/mochi/png/mochi_laughing.png
+    - assets/mochi/png/mochi_normal.png
+    - assets/mochi/png/mochi_sad.png
+    - assets/mochi/png/mochi_scared.png
+    - assets/mochi/png/mochi_tired.png
+    - assets/mochi/svg/baby_mochi_crying_svg.svg
+    - assets/mochi/svg/baby_mochi_happy_svg.svg
+    - assets/mochi/svg/baby_mochi_normal_svg.svg
+    - assets/mochi/svg/baby_mochi_sad_svg.svg
+    - assets/mochi/svg/mochi_angry_svg.svg
+    - assets/mochi/svg/mochi_confused_svg.svg
+    - assets/mochi/svg/mochi_egg_svg.svg
+    - assets/mochi/svg/mochi_happy_svg.svg
+    - assets/mochi/svg/mochi_hungry_svg.svg
+    - assets/mochi/svg/mochi_laughing_svg.svg
+    - assets/mochi/svg/mochi_normal_svg.svg
+    - assets/mochi/svg/mochi_scared_svg.svg
+    - assets/mochi/svg/mochi_tired_svg.svg
 
   fonts:
     - family: Pixelify Sans
