@@ -1,0 +1,3 @@
+class WebSocketService {
+  const WebSocketService();
+}

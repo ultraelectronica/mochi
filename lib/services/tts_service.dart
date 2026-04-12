@@ -1,0 +1,3 @@
+class TtsService {
+  const TtsService();
+}
