@@ -1,0 +1,96 @@
+# Mochi Documentation – Diagram Explanations
+
+## Tech Stack Diagram
+This diagram shows the full technology stack of Mochi, organized by system layers. The frontend uses Flutter for UI, animations, and input/output features. The backend runs on Node.js with Express, handling API logic, mood processing, and scheduled tasks.
+
+The AI layer uses TinyLlama via llama.cpp for local inference, with a Gemini API fallback when unavailable. SQLite stores persistent data such as pet state, interactions, and memories.
+
+Infrastructure tools like Termux, Cloudflare Tunnel, and Termux:Boot allow the system to run continuously on a mobile device and remain accessible online.
+
+
+## MVP Features Diagram
+This diagram outlines the phased development plan of Mochi.
+
+- Phase 1 (Core): User profiles, chat interaction, pet display, growth system, and basic mood system.
+- Phase 2 (Personality): Voice interaction, memory system, animations, and daily engagement.
+- Phase 3 (Family): Affection tracking, activity feed, and shared family features.
+
+Each phase builds on the previous one to increase emotional depth and functionality.
+
+
+## Database Schema Diagram
+This diagram visualizes the relationships between system entities.
+
+- pet: Central entity representing the shared companion.
+- members: Individual users interacting with the pet.
+- interactions: Logs conversations and XP gains.
+- memories: Stores summarized meaningful events.
+- affection: Tracks closeness between each member and the pet.
+- mood_log: Records daily mood inputs.
+
+These relationships allow both shared and personal interactions to influence the pet.
+
+
+## Architectural Design Diagram
+This diagram shows how components communicate in real time.
+
+Multiple Flutter apps connect via HTTPS to a Cloudflare Tunnel, which routes requests to the server running on the Samsung Galaxy Note 8.
+
+Node.js processes requests, retrieves data from SQLite, builds AI prompts, and sends them to TinyLlama via llama.cpp. Responses are returned to users and broadcast through WebSocket.
+
+If the local server is unavailable, the system falls back to the Gemini API.
+
+
+## Screen Navigation Map
+This diagram represents the user flow in the app.
+
+Flow:
+Splash/Onboarding -> Member Select/Create -> Home Screen
+
+From Home Screen:
+- Chat Screen
+- Mood Check-in
+- Activity Feed
+
+All paths lead to:
+Pet Profile -> Settings
+
+The navigation is centered around the pet, ensuring a simple and consistent user experience.
+
+
+## Moods Reference Diagram
+This diagram defines the emotional states of the pet.
+
+Each mood includes:
+- Color
+- Animation style
+- Response tone
+
+Examples:
+- Happy: Bright, energetic responses
+- Sad: Soft, slower responses
+- Angry: Short, tense replies
+
+Mood changes depend on interaction frequency and user input, creating a feedback loop between user behavior and pet personality.
+
+
+## Flutter File Structure Diagram
+This diagram shows the project structure.
+
+lib/
+├── main.dart
+├── config/
+├── models/
+├── services/
+├── screens/
+├── widgets/
+└── providers/
+
+Each layer has a clear responsibility:
+- models: Data structures
+- services: API, WebSocket, TTS logic
+- screens: UI pages
+- widgets: Reusable UI components
+- providers: State management
+
+This structure improves maintainability and scalability.
