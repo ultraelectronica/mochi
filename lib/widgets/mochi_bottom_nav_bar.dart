@@ -1,5 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
 
@@ -168,14 +170,11 @@ class _NavButton extends StatelessWidget {
                     border: Border.all(color: MochiPalette.ink, width: 2),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(2),
                     child: SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: SvgPicture.asset(
-                        item.assetPath,
-                        fit: BoxFit.contain,
-                      ),
+                      width: 54,
+                      height: 54,
+                      child: _SvgAssetIcon(assetPath: item.assetPath),
                     ),
                   ),
                 ),
@@ -215,6 +214,43 @@ class _TopPixel extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         border: Border.all(color: MochiPalette.ink, width: 1.5),
       ),
+    );
+  }
+}
+
+class _SvgAssetIcon extends StatelessWidget {
+  const _SvgAssetIcon({required this.assetPath});
+
+  final String assetPath;
+
+  static final RegExp _embeddedPngPattern = RegExp(
+    'data:image/png;base64,([^"\']+)',
+    caseSensitive: false,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: rootBundle.loadString(assetPath),
+      builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
+        final String? svgText = snapshot.data;
+        if (svgText == null) {
+          return const SizedBox.shrink();
+        }
+
+        final RegExpMatch? match = _embeddedPngPattern.firstMatch(svgText);
+        if (match == null) {
+          return const SizedBox.shrink();
+        }
+
+        final Uint8List bytes = base64Decode(match.group(1)!);
+        return Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.none,
+          gaplessPlayback: true,
+        );
+      },
     );
   }
 }
