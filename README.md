@@ -1,5 +1,7 @@
 # Mochi
 
+*One shared AI pet for your family—chat, moods, memories, and growth. A companion, not an assistant.*
+
 **Mochi** is a family-shared AI companion pet app. One creature lives on a shared server and grows wiser, more expressive, and more emotionally nuanced the more your family interacts with it. Each family member has their own identity and affection score with the pet, but the pet itself is singular—a shared family bond. It speaks in short, warm sentences, remembers moments, reacts to moods, and visibly evolves through life stages. It is not a smart assistant; it is a companion.
 
 ## Documentation
