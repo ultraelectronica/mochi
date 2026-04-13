@@ -62,3 +62,16 @@ lib/
 ├── widgets/         # reusable UI (pet sprite, mood tiles, chat, XP bar, avatars, nav)
 └── providers/       # Riverpod — pet and member state
 ```
+
+## Getting started (Flutter)
+
+```bash
+flutter pub get
+flutter run
+```
+
+See the [Flutter documentation](https://docs.flutter.dev/) for environment setup and tooling.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
