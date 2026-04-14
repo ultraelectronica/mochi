@@ -1,0 +1,65 @@
+[
+  {
+    "key": "happy",
+    "label": "Happy",
+    "note": "Bright replies and buoyant little hops.",
+    "reaction": "I saved a warm little smile for you.",
+    "xpModifier": 1.2
+  },
+  {
+    "key": "sad",
+    "label": "Sad",
+    "note": "Soft tone, wants the family close.",
+    "reaction": "Stay close. I like hearing family voices.",
+    "xpModifier": 0.9
+  },
+  {
+    "key": "angry",
+    "label": "Angry",
+    "note": "Sharp edges, needs a gentle reset.",
+    "reaction": "I need a tiny breath, then I can listen better.",
+    "xpModifier": 0.7
+  },
+  {
+    "key": "normal",
+    "label": "Normal",
+    "note": "Steady, warm, and ready to listen.",
+    "reaction": "I am right here. Tell me your tiny moment.",
+    "xpModifier": 1
+  },
+  {
+    "key": "tired",
+    "label": "Tired",
+    "note": "Slower motion and cozy responses.",
+    "reaction": "Can we keep today soft and slow together?",
+    "xpModifier": 0.8
+  },
+  {
+    "key": "confused",
+    "label": "Confused",
+    "note": "Head tilts and lots of wondering.",
+    "reaction": "I am still learning this feeling, but I am trying.",
+    "xpModifier": 0.85
+  },
+  {
+    "key": "laughing",
+    "label": "Laughing",
+    "note": "Playful energy with extra bounce.",
+    "reaction": "That tickles. I feel extra sparkly today.",
+    "xpModifier": 1.3
+  },
+  {
+    "key": "hungry",
+    "label": "Hungry",
+    "note": "Food hints, curious sniffing, restless wiggles.",
+    "reaction": "I could really go for a snack story right now.",
+    "xpModifier": 0.75
+  },
+  {
+    "key": "scared",
+    "label": "Scared",
+    "note": "Tiny shivers and a need for reassurance.",
+    "reaction": "Hold my paw for a second. I will calm down.",
+    "xpModifier": 0.5
+  }
+]
