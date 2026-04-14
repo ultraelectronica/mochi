@@ -34,6 +34,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_svg: ^2.0.10+1
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
