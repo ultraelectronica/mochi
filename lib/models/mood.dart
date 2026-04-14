@@ -12,6 +12,13 @@ enum MochiMood {
   confused,
 }
 
+MochiMood mochiMoodFromString(String raw) {
+  return MochiMood.values.firstWhere(
+    (MochiMood mood) => mood.name == raw,
+    orElse: () => MochiMood.normal,
+  );
+}
+
 extension MochiMoodData on MochiMood {
   String get label => switch (this) {
     MochiMood.happy => 'Happy',
