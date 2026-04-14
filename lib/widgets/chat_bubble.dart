@@ -23,6 +23,7 @@ class ChatBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final bool petSide = entry.isPet;
     final Member petAvatar = Member(
+      id: 0,
       name: 'Mochi',
       color: petProvider.pet.mood.color,
       affection: 0,
