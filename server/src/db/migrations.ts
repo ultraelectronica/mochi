@@ -58,6 +58,13 @@ export function runMigrations() {
       created_at TEXT NOT NULL DEFAULT (${nowSql})
     );
 
+    CREATE TABLE IF NOT EXISTS pet_taps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      xp_awarded INTEGER NOT NULL DEFAULT 2,
+      created_at TEXT NOT NULL DEFAULT (${nowSql})
+    );
+
     CREATE TABLE IF NOT EXISTS stage_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       stage INTEGER NOT NULL,

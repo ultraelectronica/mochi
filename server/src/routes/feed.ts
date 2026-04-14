@@ -75,7 +75,28 @@ router.get('/', (request, response) => {
       detail: `Mochi reached ${getStageDefinition(row.stage)?.name || `stage ${row.stage}`}`,
     }))
 
-  const events = [...chatEvents, ...moodEvents, ...stageEvents]
+  const tapEvents = db
+    .prepare(
+      `SELECT pet_taps.id,
+              pet_taps.created_at,
+              members.id AS member_id,
+              members.name AS member_name
+       FROM pet_taps
+       JOIN members ON members.id = pet_taps.member_id
+       ORDER BY datetime(pet_taps.created_at) DESC
+       LIMIT ?`,
+    )
+    .all(limit)
+    .map((row: { id: number; created_at: string; member_id: number; member_name: string }) => ({
+      id: `tap-${row.id}`,
+      event_type: 'pet_tap',
+      created_at: row.created_at,
+      member_id: row.member_id,
+      member_name: row.member_name,
+      detail: 'petted Mochi',
+    }))
+
+  const events = [...chatEvents, ...moodEvents, ...stageEvents, ...tapEvents]
     .sort((left, right) => right.created_at.localeCompare(left.created_at))
     .slice(0, limit)
 

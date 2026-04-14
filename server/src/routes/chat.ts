@@ -75,4 +75,32 @@ router.post('/', async (request, response) => {
   }
 })
 
+router.get('/', (request, response) => {
+  const requestedLimit = Number(request.query.limit)
+  const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 30
+
+  const interactions = db
+    .prepare(
+      `SELECT recent.id,
+              recent.member_id,
+              recent.input_text,
+              recent.response_text,
+              recent.input_type,
+              recent.xp_awarded,
+              recent.created_at,
+              members.name AS member_name
+       FROM (
+         SELECT *
+         FROM interactions
+         ORDER BY datetime(created_at) DESC, id DESC
+         LIMIT ?
+       ) AS recent
+       JOIN members ON members.id = recent.member_id
+       ORDER BY datetime(recent.created_at) ASC, recent.id ASC`,
+    )
+    .all(limit)
+
+  response.json(interactions)
+})
+
 export default router
