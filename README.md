@@ -8,6 +8,7 @@
 
 - **[docs/mochi.pdf](docs/mochi.pdf)** — Full product and architecture write-up (tech stack, device setup, database, screens, Flutter layout).
 - **[docs/mochi_diagram_explanations.txt](docs/mochi_diagram_explanations.txt)** — Text descriptions of the diagrams (stack, MVP phases, schema, architecture, navigation, moods, file structure).
+- **[docs/server_setup.md](docs/server_setup.md)** — Practical backend setup for `server/`, PM2, Termux:Boot, logs, and day-to-day server commands.
 
 ## Tech stack (system)
 
@@ -19,7 +20,7 @@
 | **Data** | SQLite (pet state, interactions, memories, etc.) |
 | **Infra (reference setup)** | Termux, Cloudflare Tunnel, Termux:Boot—e.g. a Samsung Galaxy Note 8 as an always-on home server |
 
-This repository contains the **Flutter application**. The Node/SQLite/llama stack is documented in `docs/mochi.pdf` (including a step-by-step Note 8 + Termux setup).
+This repository now contains both the **Flutter application** and the **Node/SQLite backend** in `server/`. The deeper product and architecture write-up is still in `docs/mochi.pdf`, and the practical PM2 + Termux server workflow is in `docs/server_setup.md`.
 
 ## Architecture (high level)
 
