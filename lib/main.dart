@@ -5,6 +5,7 @@ import 'models/member.dart';
 import 'models/mood.dart';
 import 'providers/member_provider.dart';
 import 'providers/pet_provider.dart';
+import 'services/floating_mochi_service.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
@@ -36,24 +37,46 @@ class MochiShell extends StatefulWidget {
   State<MochiShell> createState() => _MochiShellState();
 }
 
-class _MochiShellState extends State<MochiShell> {
+class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
   late final PetProvider _petProvider;
   late final MemberProvider _memberProvider;
+  final FloatingMochiService _floatingMochiService =
+      const FloatingMochiService();
 
   int _selectedTabIndex = 1;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _petProvider = PetProvider();
     _memberProvider = MemberProvider.seeded();
+    _floatingMochiService.syncAppForegroundState(true);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _floatingMochiService.syncAppForegroundState(true);
     _petProvider.dispose();
     _memberProvider.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _floatingMochiService.syncAppForegroundState(true);
+        return;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _floatingMochiService.syncAppForegroundState(false);
+        return;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+        return;
+    }
   }
 
   Future<void> _handleSendMessage(String text) async {
