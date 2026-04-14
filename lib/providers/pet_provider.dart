@@ -2,96 +2,37 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../config/app_config.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
+import '../services/api_service.dart';
+import '../services/websocket_service.dart';
 
 class PetProvider extends ChangeNotifier {
-  PetProvider()
-    : _pet = const Pet(name: 'Mochi', xp: 186, mood: MochiMood.happy),
-      _chatEntries = <ChatEntry>[
-        const ChatEntry(
-          author: 'Mochi',
-          text:
-              'Hi family. I kept a bright little corner ready for whoever visits first.',
-          isPet: true,
-          timestamp: '9:08',
-        ),
-        const ChatEntry(
-          author: 'Arne',
-          text: 'Morning, Mochi. We are all a bit sleepy today.',
-          isPet: false,
-          timestamp: '9:10',
-        ),
-        const ChatEntry(
-          author: 'Mochi',
-          text:
-              'Then I will stay cozy too. Tiny steps are enough for this morning.',
-          isPet: true,
-          timestamp: '9:10',
-        ),
-      ],
-      _feedEntries = <ActivityEntry>[
-        const ActivityEntry(
-          title: 'Arne chatted with Mochi',
-          detail: 'The pet replied with a sleepy but warm morning check-in.',
-          timestamp: '6m ago',
-          accent: MochiPalette.cloudBlue,
-          icon: Icons.chat_bubble_rounded,
-        ),
-        const ActivityEntry(
-          title: 'Bea checked in as Happy',
-          detail: 'Mochi brightened and shifted toward a playful mood.',
-          timestamp: '18m ago',
-          accent: MochiPalette.lightPink,
-          icon: Icons.favorite_rounded,
-        ),
-        const ActivityEntry(
-          title: 'Mochi reached Companion stage',
-          detail:
-              'The family unlocked richer memories and more expressive reactions.',
-          timestamp: 'Yesterday',
-          accent: MochiPalette.yellow,
-          icon: Icons.auto_awesome_rounded,
-        ),
-      ],
-      _memories = <MemorySnippet>[
-        const MemorySnippet(
-          title: 'Picnic blanket day',
-          body:
-              'Mochi remembers the yellow blanket, cloud-blue cups, and everyone sitting close together.',
-          timestamp: 'Saved 2 days ago',
-          accent: MochiPalette.yellow,
-        ),
-        const MemorySnippet(
-          title: 'Rainy night voice note',
-          body:
-              'Lia whispered a bedtime story while the whole house sounded soft and sleepy.',
-          timestamp: 'Saved 4 days ago',
-          accent: MochiPalette.lightPink,
-        ),
-        const MemorySnippet(
-          title: 'After-school snack run',
-          body:
-              'Nico told Mochi about buns, juice, and a tiny argument that ended in a laugh.',
-          timestamp: 'Saved 6 days ago',
-          accent: MochiPalette.cloudBlue,
-        ),
-      ];
+  PetProvider({ApiService? apiService, WebSocketService? webSocketService})
+    : _apiService = apiService ?? ApiService(),
+      _webSocketService = webSocketService ?? WebSocketService();
 
-  Pet _pet;
-  final List<ChatEntry> _chatEntries;
-  final List<ActivityEntry> _feedEntries;
-  final List<MemorySnippet> _memories;
-  final Map<String, MochiMood> _memberCheckIns = <String, MochiMood>{};
+  final ApiService _apiService;
+  final WebSocketService _webSocketService;
 
-  bool _serverOnline = true;
+  StreamSubscription<Map<String, dynamic>>? _webSocketSubscription;
+
+  Pet? _pet;
+  List<ChatEntry> _chatEntries = <ChatEntry>[];
+  List<ActivityEntry> _feedEntries = <ActivityEntry>[];
+  List<MemorySnippet> _memories = <MemorySnippet>[];
+  Map<String, MochiMood> _memberCheckIns = <String, MochiMood>{};
+
+  bool _serverOnline = false;
+  bool _llamaOnline = false;
   bool _ttsEnabled = true;
   bool _notificationsEnabled = true;
   bool _replyPending = false;
+  bool _isLoading = true;
+  String? _errorMessage;
 
-  Pet get pet => _pet;
+  Pet get pet => _pet!;
   List<ChatEntry> get chatEntries => List<ChatEntry>.unmodifiable(_chatEntries);
   List<ActivityEntry> get feedEntries =>
       List<ActivityEntry>.unmodifiable(_feedEntries);
@@ -100,13 +41,17 @@ class PetProvider extends ChangeNotifier {
   Map<String, MochiMood> get memberCheckIns =>
       Map<String, MochiMood>.unmodifiable(_memberCheckIns);
   bool get serverOnline => _serverOnline;
+  bool get llamaOnline => _llamaOnline;
   bool get ttsEnabled => _ttsEnabled;
   bool get notificationsEnabled => _notificationsEnabled;
   bool get replyPending => _replyPending;
+  bool get isLoading => _isLoading;
+  bool get hasPet => _pet != null;
+  String? get errorMessage => _errorMessage;
 
   MochiMood? moodForMember(String memberName) => _memberCheckIns[memberName];
 
-  String greetingFor(String memberName) => switch (_pet.mood) {
+  String greetingFor(String memberName) => switch (pet.mood) {
     MochiMood.happy => 'Hi $memberName. I kept the room bright for you.',
     MochiMood.laughing =>
       'Hi $memberName. I am wiggly today and ready to play.',
@@ -122,12 +67,169 @@ class PetProvider extends ChangeNotifier {
       'Hi $memberName. I am curious and still figuring things out.',
   };
 
-  void setServerOnline(bool value) {
-    if (_serverOnline == value) {
-      return;
-    }
-    _serverOnline = value;
+  Future<void> initialize() async {
+    _isLoading = true;
+    _errorMessage = null;
     notifyListeners();
+
+    try {
+      await refreshState(includeHealth: true, includeChat: true);
+      await connectRealtime();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> connectRealtime() async {
+    await _webSocketSubscription?.cancel();
+    await _webSocketService.connect();
+    _webSocketSubscription = _webSocketService.events.listen((
+      Map<String, dynamic> event,
+    ) {
+      unawaited(_handleRealtimeEvent(event));
+    });
+  }
+
+  Future<void> reconnectRealtime() async {
+    await connectRealtime();
+  }
+
+  Future<void> refreshState({
+    bool includeHealth = true,
+    bool includeChat = true,
+  }) async {
+    try {
+      if (includeHealth) {
+        final ({bool serverOnline, bool llamaOnline}) health = await _apiService
+            .fetchHealth();
+        _serverOnline = health.serverOnline;
+        _llamaOnline = health.llamaOnline;
+      }
+
+      final List<Future<Object>> requests = <Future<Object>>[
+        _apiService.fetchPet(),
+        _apiService.fetchMemories(),
+        _apiService.fetchFeed(),
+        _apiService.fetchTodayMoodMap(),
+      ];
+
+      if (includeChat) {
+        requests.add(_apiService.fetchChatHistory());
+      }
+
+      final List<Object> results = await Future.wait<Object>(requests);
+
+      _pet = results[0] as Pet;
+      _memories = results[1] as List<MemorySnippet>;
+      _feedEntries = results[2] as List<ActivityEntry>;
+      _memberCheckIns = results[3] as Map<String, MochiMood>;
+      if (includeChat) {
+        _chatEntries = results[4] as List<ChatEntry>;
+      }
+      _serverOnline = true;
+      _errorMessage = null;
+    } catch (error) {
+      _applyError(error);
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> sendMessage({
+    required Member member,
+    required String text,
+  }) async {
+    final ChatEntry optimistic = ChatEntry.local(
+      author: member.name,
+      text: text,
+      isPet: false,
+    );
+
+    _chatEntries = <ChatEntry>[..._chatEntries, optimistic];
+    _replyPending = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final ({String reply, Pet pet}) result = await _apiService.sendMessage(
+        memberId: member.id,
+        text: text,
+      );
+
+      _pet = result.pet;
+      _chatEntries = <ChatEntry>[
+        ..._chatEntries,
+        ChatEntry.local(author: 'Mochi', text: result.reply, isPet: true),
+      ];
+      _serverOnline = true;
+      _errorMessage = null;
+
+      try {
+        await refreshState(includeHealth: false, includeChat: true);
+      } catch (_) {
+        notifyListeners();
+      }
+    } catch (error) {
+      _chatEntries = List<ChatEntry>.from(_chatEntries)..remove(optimistic);
+      _applyError(error);
+      rethrow;
+    } finally {
+      _replyPending = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> checkIn({
+    required Member member,
+    required MochiMood mood,
+  }) async {
+    try {
+      final result = await _apiService.checkInMood(
+        memberId: member.id,
+        mood: mood,
+      );
+      _pet = result.pet;
+      _serverOnline = true;
+      _errorMessage = null;
+
+      try {
+        await refreshState(includeHealth: false, includeChat: false);
+      } catch (_) {
+        notifyListeners();
+      }
+      return true;
+    } on ApiException catch (error) {
+      if (error.statusCode == 409) {
+        _errorMessage = null;
+        _serverOnline = true;
+        return false;
+      }
+      _applyError(error);
+      rethrow;
+    } catch (error) {
+      _applyError(error);
+      rethrow;
+    }
+  }
+
+  Future<void> tapPet(Member member) async {
+    try {
+      final result = await _apiService.tapPet(memberId: member.id);
+      _pet = result.pet;
+      _serverOnline = true;
+      _errorMessage = null;
+
+      try {
+        await refreshState(includeHealth: false, includeChat: false);
+      } catch (_) {
+        notifyListeners();
+      }
+    } catch (error) {
+      _applyError(error);
+      rethrow;
+    }
   }
 
   void setTtsEnabled(bool value) {
@@ -146,206 +248,44 @@ class PetProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void tapPet(String memberName) {
-    _pet = _pet.copyWith(mood: MochiMood.laughing, xp: _pet.xp + 2);
-    _prependFeed(
-      ActivityEntry(
-        title: '$memberName petted Mochi',
-        detail: 'The pet bounced happily and sent a tiny surprise reaction.',
-        timestamp: 'just now',
-        accent: MochiPalette.lightPink,
-        icon: Icons.front_hand_rounded,
-      ),
-    );
-    _handleStageUp();
-    notifyListeners();
-  }
-
-  bool checkIn({required Member member, required MochiMood mood}) {
-    if (_memberCheckIns.containsKey(member.name)) {
-      return false;
-    }
-
-    _memberCheckIns[member.name] = mood;
-    _pet = _pet.copyWith(mood: _aggregatePetMood(), xp: _pet.xp + 5);
-    _prependFeed(
-      ActivityEntry(
-        title: '${member.name} checked in as ${mood.label}',
-        detail: 'The pet adjusted its tone and mood glow in response.',
-        timestamp: 'just now',
-        accent: mood.color.withValues(alpha: 0.28),
-        icon: Icons.favorite_rounded,
-      ),
-    );
-    _handleStageUp();
-    notifyListeners();
-    return true;
-  }
-
-  Future<void> sendMessage({
-    required Member member,
-    required String text,
-  }) async {
-    final PetStage before = _pet.stage;
-    _chatEntries.add(
-      ChatEntry(
-        author: member.name,
-        text: text,
-        isPet: false,
-        timestamp: 'now',
-      ),
-    );
-    _replyPending = true;
-    _pet = _pet.copyWith(
-      mood: _nextMoodFromConversation(text),
-      xp: _pet.xp + 10,
-    );
-    _prependFeed(
-      ActivityEntry(
-        title: '${member.name} chatted with Mochi',
-        detail: 'A new conversation turn was added to the family pet story.',
-        timestamp: 'just now',
-        accent: MochiPalette.cloudBlue,
-        icon: Icons.chat_bubble_rounded,
-      ),
-    );
-    _handleStageUp(beforeStage: before);
-    notifyListeners();
-
-    await Future<void>.delayed(const Duration(milliseconds: 420));
-
-    _chatEntries.add(
-      ChatEntry(
-        author: _pet.name,
-        text: _replyFor(text),
-        isPet: true,
-        timestamp: 'now',
-      ),
-    );
-    _replyPending = false;
-    notifyListeners();
-  }
-
-  void _handleStageUp({PetStage? beforeStage}) {
-    final PetStage before = beforeStage ?? petStageForXp(_pet.xp - 1);
-    final PetStage after = _pet.stage;
-    if (before == after) {
+  void clearError() {
+    if (_errorMessage == null) {
       return;
     }
-    _prependFeed(
-      ActivityEntry(
-        title: '${_pet.name} reached ${after.label}',
-        detail:
-            'A new life stage unlocked richer memories and stronger family reactions.',
-        timestamp: 'just now',
-        accent: MochiPalette.yellow,
-        icon: Icons.auto_awesome_rounded,
-      ),
-    );
-    _pet = _pet.copyWith(mood: MochiMood.laughing);
+
+    _errorMessage = null;
+    notifyListeners();
   }
 
-  void _prependFeed(ActivityEntry entry) {
-    _feedEntries.insert(0, entry);
-    if (_feedEntries.length > 12) {
-      _feedEntries.removeLast();
+  Future<void> _handleRealtimeEvent(Map<String, dynamic> event) async {
+    final Map<String, dynamic>? petJson = event['pet'] as Map<String, dynamic>?;
+    if (petJson != null) {
+      _pet = Pet.fromJson(petJson);
+      notifyListeners();
+    }
+
+    try {
+      await refreshState(includeHealth: false, includeChat: true);
+    } catch (_) {
+      // Keep the last known state if the follow-up refresh fails.
     }
   }
 
-  MochiMood _aggregatePetMood() {
-    if (_memberCheckIns.isEmpty) {
-      return _pet.mood;
+  void _applyError(Object error) {
+    if (error is ApiException) {
+      _errorMessage = error.message;
+      _serverOnline = error.statusCode != null;
+      return;
     }
 
-    int score = 0;
-    for (final MochiMood mood in _memberCheckIns.values) {
-      score += switch (mood) {
-        MochiMood.happy || MochiMood.laughing => 2,
-        MochiMood.normal => 0,
-        MochiMood.tired ||
-        MochiMood.sad ||
-        MochiMood.scared ||
-        MochiMood.hungry ||
-        MochiMood.confused => -1,
-        MochiMood.angry => -2,
-      };
-    }
-
-    if (score >= 4) {
-      return MochiMood.happy;
-    }
-    if (score >= 2) {
-      return MochiMood.normal;
-    }
-    if (score <= -4) {
-      return MochiMood.tired;
-    }
-    if (score <= -2) {
-      return MochiMood.sad;
-    }
-    return MochiMood.normal;
+    _errorMessage = 'Failed to sync with the Mochi server';
+    _serverOnline = false;
   }
 
-  MochiMood _nextMoodFromConversation(String text) {
-    final String lower = text.toLowerCase();
-    if (lower.contains('sleep') || lower.contains('tired')) {
-      return MochiMood.tired;
-    }
-    if (lower.contains('food') ||
-        lower.contains('snack') ||
-        lower.contains('eat')) {
-      return MochiMood.hungry;
-    }
-    if (lower.contains('fun') ||
-        lower.contains('play') ||
-        lower.contains('haha')) {
-      return MochiMood.laughing;
-    }
-    if (lower.contains('sad') || lower.contains('bad')) {
-      return MochiMood.sad;
-    }
-    return MochiMood.happy;
-  }
-
-  String _replyFor(String text) {
-    final String lower = text.toLowerCase();
-    if (lower.contains('sad') ||
-        lower.contains('bad') ||
-        lower.contains('hard')) {
-      return 'I can stay soft with you. We do not need to rush this feeling.';
-    }
-    if (lower.contains('food') ||
-        lower.contains('snack') ||
-        lower.contains('eat')) {
-      return 'That sounds delicious. I am storing this snack memory for later.';
-    }
-    if (lower.contains('school') ||
-        lower.contains('work') ||
-        lower.contains('busy')) {
-      return 'That sounds like a big day. I can hold the quiet parts for you.';
-    }
-    if (lower.contains('love') ||
-        lower.contains('family') ||
-        lower.contains('home')) {
-      return 'Family words make me feel bigger and warmer inside.';
-    }
-
-    return switch (_pet.mood) {
-      MochiMood.happy =>
-        'I am feeling bright. Tell me one tiny good thing from your day.',
-      MochiMood.laughing => 'Hehe. That makes my little pixels wiggle.',
-      MochiMood.normal =>
-        'I am listening. Even the small moments matter to me.',
-      MochiMood.tired => 'I am still here. We can keep things cozy and short.',
-      MochiMood.sad =>
-        'Thank you for checking in. I feel better when family stays close.',
-      MochiMood.angry =>
-        'I am cooling down. Your message helps smooth the sharp edges.',
-      MochiMood.scared => 'You are here, so I can breathe easier now.',
-      MochiMood.hungry =>
-        'I would trade one giggle for one imaginary bun right now.',
-      MochiMood.confused =>
-        'I am not sure yet, but I want to understand with you.',
-    };
+  @override
+  void dispose() {
+    unawaited(_webSocketSubscription?.cancel());
+    unawaited(_webSocketService.dispose());
+    super.dispose();
   }
 }

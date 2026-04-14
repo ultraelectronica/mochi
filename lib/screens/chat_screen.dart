@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
@@ -15,6 +17,7 @@ class ChatScreen extends StatefulWidget {
     required this.petProvider,
     required this.memberProvider,
     required this.onSendMessage,
+    required this.onRefreshHistory,
     this.onToggleFullscreen,
     this.isFullscreen = false,
   });
@@ -22,6 +25,7 @@ class ChatScreen extends StatefulWidget {
   final PetProvider petProvider;
   final MemberProvider memberProvider;
   final Future<void> Function(String text) onSendMessage;
+  final Future<void> Function() onRefreshHistory;
   final VoidCallback? onToggleFullscreen;
   final bool isFullscreen;
 
@@ -34,6 +38,7 @@ class _ChatScreenState extends State<ChatScreen> {
   late final ScrollController _scrollController;
   bool _headerCollapsed = false;
   double _headerDragDelta = 0;
+  int _lastRenderedEntryCount = 0;
 
   @override
   void initState() {
@@ -45,11 +50,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void didUpdateWidget(covariant ChatScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.petProvider.chatEntries.length !=
-            widget.petProvider.chatEntries.length ||
-        oldWidget.petProvider.replyPending != widget.petProvider.replyPending) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
-    }
   }
 
   @override
@@ -113,10 +113,22 @@ class _ChatScreenState extends State<ChatScreen> {
     await widget.onSendMessage(text);
   }
 
+  Future<void> _refreshHistory() async {
+    await widget.onRefreshHistory();
+  }
+
   @override
   Widget build(BuildContext context) {
     final Member currentMember = widget.memberProvider.currentMember;
     final pet = widget.petProvider.pet;
+    final int visibleEntryCount =
+        widget.petProvider.chatEntries.length +
+        (widget.petProvider.replyPending ? 1 : 0);
+
+    if (visibleEntryCount != _lastRenderedEntryCount) {
+      _lastRenderedEntryCount = visibleEntryCount;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+    }
 
     return Column(
       children: <Widget>[
@@ -138,14 +150,18 @@ class _ChatScreenState extends State<ChatScreen> {
               child: _headerCollapsed
                   ? _CollapsedChatHeader(
                       pet: pet,
+                      serverOnline: widget.petProvider.serverOnline,
                       ttsEnabled: widget.petProvider.ttsEnabled,
+                      onRefreshHistory: _refreshHistory,
                       isFullscreen: widget.isFullscreen,
                       onToggleFullscreen: widget.onToggleFullscreen,
                       onExpand: () => _setHeaderCollapsed(false),
                     )
                   : _ExpandedChatHeader(
                       pet: pet,
+                      serverOnline: widget.petProvider.serverOnline,
                       ttsEnabled: widget.petProvider.ttsEnabled,
+                      onRefreshHistory: _refreshHistory,
                       isFullscreen: widget.isFullscreen,
                       onToggleFullscreen: widget.onToggleFullscreen,
                       onCollapse: () => _setHeaderCollapsed(true),
@@ -157,30 +173,81 @@ class _ChatScreenState extends State<ChatScreen> {
         Expanded(
           child: Container(
             decoration: pixelCardDecoration(MochiPalette.cloudBlue),
-            child: ListView.separated(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
-              itemCount:
-                  widget.petProvider.chatEntries.length +
-                  (widget.petProvider.replyPending ? 1 : 0),
-              separatorBuilder: (BuildContext context, int index) =>
-                  const SizedBox(height: 12),
-              itemBuilder: (BuildContext context, int index) {
-                if (widget.petProvider.replyPending &&
-                    index == widget.petProvider.chatEntries.length) {
-                  return _TypingBubble(color: pet.mood.color);
-                }
+            child: RefreshIndicator(
+              onRefresh: _refreshHistory,
+              child:
+                  widget.petProvider.chatEntries.isEmpty &&
+                      !widget.petProvider.replyPending
+                  ? ListView(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(24),
+                      children: <Widget>[
+                        const SizedBox(height: 80),
+                        Text(
+                          'Mochi is listening. Send the first tiny family moment to begin the shared chat history.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Pull to refresh if older messages were added from another device.',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+                      itemCount:
+                          widget.petProvider.chatEntries.length +
+                          (widget.petProvider.replyPending ? 1 : 0),
+                      separatorBuilder: (BuildContext context, int index) =>
+                          const SizedBox(height: 12),
+                      itemBuilder: (BuildContext context, int index) {
+                        if (widget.petProvider.replyPending &&
+                            index == widget.petProvider.chatEntries.length) {
+                          return _TypingBubble(color: pet.mood.color);
+                        }
 
-                return ChatBubble(
-                  entry: widget.petProvider.chatEntries[index],
-                  currentMember: currentMember,
-                  petProvider: widget.petProvider,
-                );
-              },
+                        return ChatBubble(
+                          entry: widget.petProvider.chatEntries[index],
+                          currentMember: currentMember,
+                          petProvider: widget.petProvider,
+                        );
+                      },
+                    ),
             ),
           ),
         ),
         const SizedBox(height: 12),
+        if (widget.petProvider.errorMessage != null) ...<Widget>[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: pixelCardDecoration(MochiPalette.peach),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.sync_problem_rounded, color: MochiPalette.ink),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    widget.petProvider.errorMessage!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                TextButton(
+                  onPressed: _refreshHistory,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         Container(
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
           decoration: pixelCardDecoration(MochiPalette.yellow),
@@ -219,6 +286,7 @@ class _TypingBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Member petAvatar = Member(
+      id: 0,
       name: 'Mochi',
       color: color,
       affection: 0,
@@ -275,14 +343,18 @@ class _TypingBubble extends StatelessWidget {
 class _ExpandedChatHeader extends StatelessWidget {
   const _ExpandedChatHeader({
     required this.pet,
+    required this.serverOnline,
     required this.ttsEnabled,
+    required this.onRefreshHistory,
     required this.isFullscreen,
     required this.onToggleFullscreen,
     required this.onCollapse,
   });
 
   final Pet pet;
+  final bool serverOnline;
   final bool ttsEnabled;
+  final Future<void> Function() onRefreshHistory;
   final bool isFullscreen;
   final VoidCallback? onToggleFullscreen;
   final VoidCallback onCollapse;
@@ -295,6 +367,7 @@ class _ExpandedChatHeader extends StatelessWidget {
           children: <Widget>[
             MemberAvatar(
               member: Member(
+                id: 0,
                 name: 'Mochi',
                 color: pet.mood.color,
                 affection: 0,
@@ -325,7 +398,9 @@ class _ExpandedChatHeader extends StatelessWidget {
               ),
             ),
             _ChatHeaderActions(
+              serverOnline: serverOnline,
               ttsEnabled: ttsEnabled,
+              onRefreshHistory: onRefreshHistory,
               isFullscreen: isFullscreen,
               onToggleFullscreen: onToggleFullscreen,
             ),
@@ -345,14 +420,18 @@ class _ExpandedChatHeader extends StatelessWidget {
 class _CollapsedChatHeader extends StatelessWidget {
   const _CollapsedChatHeader({
     required this.pet,
+    required this.serverOnline,
     required this.ttsEnabled,
+    required this.onRefreshHistory,
     required this.isFullscreen,
     required this.onToggleFullscreen,
     required this.onExpand,
   });
 
   final Pet pet;
+  final bool serverOnline;
   final bool ttsEnabled;
+  final Future<void> Function() onRefreshHistory;
   final bool isFullscreen;
   final VoidCallback? onToggleFullscreen;
   final VoidCallback onExpand;
@@ -366,6 +445,7 @@ class _CollapsedChatHeader extends StatelessWidget {
           children: <Widget>[
             MemberAvatar(
               member: Member(
+                id: 0,
                 name: 'Mochi',
                 color: pet.mood.color,
                 affection: 0,
@@ -396,7 +476,9 @@ class _CollapsedChatHeader extends StatelessWidget {
               ),
             ),
             _ChatHeaderActions(
+              serverOnline: serverOnline,
               ttsEnabled: ttsEnabled,
+              onRefreshHistory: onRefreshHistory,
               isFullscreen: isFullscreen,
               onToggleFullscreen: onToggleFullscreen,
             ),
@@ -415,12 +497,16 @@ class _CollapsedChatHeader extends StatelessWidget {
 
 class _ChatHeaderActions extends StatelessWidget {
   const _ChatHeaderActions({
+    required this.serverOnline,
     required this.ttsEnabled,
+    required this.onRefreshHistory,
     required this.isFullscreen,
     required this.onToggleFullscreen,
   });
 
+  final bool serverOnline;
   final bool ttsEnabled;
+  final Future<void> Function() onRefreshHistory;
   final bool isFullscreen;
   final VoidCallback? onToggleFullscreen;
 
@@ -432,9 +518,21 @@ class _ChatHeaderActions extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: <Widget>[
         _ChatBadge(
+          label: serverOnline ? 'Live history' : 'Offline',
+          color: serverOnline ? MochiPalette.mint : MochiPalette.peach,
+          icon: serverOnline ? Icons.sync_rounded : Icons.sync_problem_rounded,
+        ),
+        _ChatBadge(
           label: ttsEnabled ? 'Voice on' : 'Voice muted',
           color: ttsEnabled ? MochiPalette.lightPink : MochiPalette.cloudBlue,
           icon: ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+        ),
+        _ChatActionButton(
+          icon: Icons.refresh_rounded,
+          label: 'Refresh',
+          onPressed: () {
+            unawaited(onRefreshHistory());
+          },
         ),
         if (onToggleFullscreen != null)
           _ChatActionButton(

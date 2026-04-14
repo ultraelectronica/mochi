@@ -316,12 +316,18 @@ class _ProfilePanel extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 10),
-          ...memories.take(2).map((MemorySnippet memory) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _MemoryTile(memory: memory),
-            );
-          }),
+          if (memories.isEmpty)
+            Text(
+              'Mochi will save favorite family moments here after a few conversations.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            )
+          else
+            ...memories.take(2).map((MemorySnippet memory) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _MemoryTile(memory: memory),
+              );
+            }),
           const SizedBox(height: 6),
           Text(
             'Affection leaderboard',
@@ -499,12 +505,18 @@ class _FeedPanel extends StatelessWidget {
                 'Chats, check-ins, and milestones stay visible from Home in this draft.',
           ),
           const SizedBox(height: 12),
-          ...entries.take(4).map((ActivityEntry entry) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _FeedTile(entry: entry),
-            );
-          }),
+          if (entries.isEmpty)
+            Text(
+              'The feed wakes up after the first chat, mood check-in, or pet tap.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            )
+          else
+            ...entries.take(4).map((ActivityEntry entry) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _FeedTile(entry: entry),
+              );
+            }),
         ],
       ),
     );

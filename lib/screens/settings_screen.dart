@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
+import '../models/member.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
 import '../services/device_permission_service.dart';
 import '../services/floating_mochi_service.dart';
+import '../widgets/create_member_dialog.dart';
+import '../widgets/member_avatar.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -31,6 +34,18 @@ class _SettingsScreenState extends State<SettingsScreen>
   DevicePermissionSnapshot? _permissionSnapshot;
   FloatingMochiState? _floatingMochiState;
   String? _pendingPermissionKey;
+
+  String _errorMessage(Object error) {
+    return widget.memberProvider.errorMessage ??
+        widget.petProvider.errorMessage ??
+        error.toString().replaceFirst('Exception: ', '');
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   void initState() {
@@ -179,6 +194,82 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  Future<void> _handleCreateMember() async {
+    final MemberDraft? draft = await showDialog<MemberDraft>(
+      context: context,
+      builder: (BuildContext context) => const CreateMemberDialog(),
+    );
+
+    if (draft == null || !mounted) {
+      return;
+    }
+
+    try {
+      final Member member = await widget.memberProvider.createMember(
+        name: draft.name,
+        color: draft.color,
+      );
+      await widget.petProvider.refreshState(
+        includeHealth: false,
+        includeChat: false,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showSnackBar('${member.name} joined Mochi\'s family room.');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showSnackBar(_errorMessage(error));
+    }
+  }
+
+  Future<void> _handleDeleteMember(Member member) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Remove member'),
+          content: Text(
+            'Remove ${member.name} from Mochi\'s shared family room? Their affection, XP, mood check-ins, and chat history links will be deleted.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    try {
+      await widget.memberProvider.deleteMember(member);
+      await widget.petProvider.refreshState(
+        includeHealth: false,
+        includeChat: false,
+      );
+      if (!mounted) {
+        return;
+      }
+      _showSnackBar('${member.name} was removed from the family list.');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showSnackBar(_errorMessage(error));
+    }
+  }
+
   Color _permissionAccent(DevicePermissionState state) {
     switch (state) {
       case DevicePermissionState.granted:
@@ -296,17 +387,24 @@ class _SettingsScreenState extends State<SettingsScreen>
                   icon: Icons.cloud_done_rounded,
                 ),
                 const SizedBox(height: 10),
-                _SettingsToggleRow(
+                _SettingsInfoRow(
                   title: 'Server status',
                   subtitle: widget.petProvider.serverOnline
                       ? 'Online and ready for live updates'
-                      : 'Offline, fallback mode active',
+                      : 'Offline or unreachable right now',
                   icon: widget.petProvider.serverOnline
                       ? Icons.wifi_rounded
                       : Icons.portable_wifi_off_rounded,
-                  value: widget.petProvider.serverOnline,
-                  activeColor: MochiPalette.mint,
-                  onChanged: widget.petProvider.setServerOnline,
+                ),
+                const SizedBox(height: 10),
+                _SettingsInfoRow(
+                  title: 'Llama status',
+                  subtitle: widget.petProvider.llamaOnline
+                      ? 'Local llama server is reachable'
+                      : 'Gemini fallback will be used if chat is requested',
+                  icon: widget.petProvider.llamaOnline
+                      ? Icons.psychology_rounded
+                      : Icons.psychology_alt_rounded,
                 ),
                 const SizedBox(height: 10),
                 _SettingsToggleRow(
@@ -336,6 +434,64 @@ class _SettingsScreenState extends State<SettingsScreen>
                   subtitle: widget.memberProvider.currentMember.name,
                   icon: Icons.person_rounded,
                 ),
+                const SizedBox(height: 10),
+                Text(
+                  'Family members',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Select who is using this device, add new profiles, or remove old ones from the shared room.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    onPressed: widget.memberProvider.isCreating
+                        ? null
+                        : _handleCreateMember,
+                    icon: widget.memberProvider.isCreating
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.person_add_alt_1_rounded),
+                    label: Text(
+                      widget.memberProvider.isCreating
+                          ? 'Adding member...'
+                          : 'Add member',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                if (widget.memberProvider.isLoading)
+                  const _SettingsLoadingRow(title: 'Loading family members')
+                else ...<Widget>[
+                  ...List<
+                    Widget
+                  >.generate(widget.memberProvider.members.length, (int index) {
+                    final Member member = widget.memberProvider.members[index];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom:
+                            index == widget.memberProvider.members.length - 1
+                            ? 0
+                            : 10,
+                      ),
+                      child: _MemberManagementRow(
+                        member: member,
+                        selected: widget.memberProvider.selectedIndex == index,
+                        busy:
+                            widget.memberProvider.deletingMemberId == member.id,
+                        onSelect: () =>
+                            widget.memberProvider.selectMember(index),
+                        onDelete: () => _handleDeleteMember(member),
+                      ),
+                    );
+                  }),
+                ],
                 const SizedBox(height: 10),
                 _SettingsInfoRow(
                   title: 'Render mode',
@@ -741,6 +897,91 @@ class _SettingsLoadingRow extends StatelessWidget {
           const SizedBox(width: 12),
           Text(title, style: Theme.of(context).textTheme.bodyMedium),
         ],
+      ),
+    );
+  }
+}
+
+class _MemberManagementRow extends StatelessWidget {
+  const _MemberManagementRow({
+    required this.member,
+    required this.selected,
+    required this.busy,
+    required this.onSelect,
+    required this.onDelete,
+  });
+
+  final Member member;
+  final bool selected;
+  final bool busy;
+  final VoidCallback onSelect;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? member.color.withValues(alpha: 0.2) : Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: busy ? null : onSelect,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: MochiPalette.ink, width: 2),
+          ),
+          child: Row(
+            children: <Widget>[
+              MemberAvatar(member: member, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      member.name,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${member.affection} affection • ${member.xp} XP',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: MochiPalette.mint,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: MochiPalette.ink, width: 2),
+                  ),
+                  child: Text(
+                    'Current',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
+                ),
+              busy
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : IconButton(
+                      onPressed: onDelete,
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      tooltip: 'Remove member',
+                    ),
+            ],
+          ),
+        ),
       ),
     );
   }
