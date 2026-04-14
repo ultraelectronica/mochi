@@ -2,7 +2,25 @@ import 'package:flutter/material.dart';
 
 class AppConfig {
   static const String appTitle = 'Mochi';
-  static const String serverUrl = 'https://mochi-family.example';
+  static const String serverUrl = String.fromEnvironment(
+    'MOCHI_SERVER_URL',
+    defaultValue: 'http://127.0.0.1:3000',
+  );
+
+  static Uri get serverUri => Uri.parse(serverUrl);
+
+  static Uri apiUri(String path, [Map<String, String>? queryParameters]) {
+    final Uri resolved = serverUri.resolve(path);
+    return resolved.replace(queryParameters: queryParameters);
+  }
+
+  static Uri get webSocketUri {
+    final Uri uri = serverUri;
+    return uri.replace(
+      scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+      path: uri.path.isEmpty ? '/' : uri.path,
+    );
+  }
 }
 
 class MochiPalette {
