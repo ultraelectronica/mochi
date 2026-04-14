@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
 import '../models/member.dart';
+import '../models/mood.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
 import '../services/device_permission_service.dart';
@@ -45,6 +46,27 @@ class _SettingsScreenState extends State<SettingsScreen>
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _formatMemberLastSeen(DateTime? value) {
+    if (value == null) {
+      return 'Not seen yet';
+    }
+
+    final Duration delta = DateTime.now().difference(value);
+    if (delta.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (delta.inMinutes < 60) {
+      return '${delta.inMinutes}m ago';
+    }
+    if (delta.inHours < 24) {
+      return '${delta.inHours}h ago';
+    }
+    if (delta.inDays == 1) {
+      return 'Yesterday';
+    }
+    return '${value.month}/${value.day}/${value.year}';
   }
 
   @override
@@ -492,6 +514,20 @@ class _SettingsScreenState extends State<SettingsScreen>
                     );
                   }),
                 ],
+                const SizedBox(height: 12),
+                if (widget.memberProvider.isLoadingSelectedMemberDetail)
+                  const _SettingsLoadingRow(title: 'Loading member details')
+                else if (widget.memberProvider.selectedMemberDetail != null)
+                  _MemberDetailCard(
+                    detail: widget.memberProvider.selectedMemberDetail!,
+                    lastSeenLabel: _formatMemberLastSeen(
+                      widget
+                          .memberProvider
+                          .selectedMemberDetail!
+                          .member
+                          .lastSeenAt,
+                    ),
+                  ),
                 const SizedBox(height: 10),
                 _SettingsInfoRow(
                   title: 'Render mode',
@@ -982,6 +1018,142 @@ class _MemberManagementRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MemberDetailCard extends StatelessWidget {
+  const _MemberDetailCard({required this.detail, required this.lastSeenLabel});
+
+  final MemberDetail detail;
+  final String lastSeenLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: detail.member.color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            '${detail.member.name} details',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            detail.member.note,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              _MemberDetailPill(
+                label: '${detail.member.xp} XP',
+                icon: Icons.bolt_rounded,
+                color: MochiPalette.yellow,
+              ),
+              _MemberDetailPill(
+                label: '${detail.member.affection} affection',
+                icon: Icons.favorite_rounded,
+                color: MochiPalette.lightPink,
+              ),
+              _MemberDetailPill(
+                label: 'Seen $lastSeenLabel',
+                icon: Icons.schedule_rounded,
+                color: MochiPalette.cloudBlue,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Recent mood history',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 10),
+          if (detail.recentMoodLogs.isEmpty)
+            Text(
+              'No mood check-ins recorded yet for this member.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            )
+          else
+            ...detail.recentMoodLogs.take(5).map((MemberMoodLog log) {
+              final MochiMood mood = mochiMoodFromString(log.mood);
+              final DateTime time = log.createdAt;
+              final String dateLabel = '${time.month}/${time.day}/${time.year}';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: mood.color.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: MochiPalette.ink, width: 2),
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      Icon(mood.icon, color: MochiPalette.ink, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          mood.label,
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                      ),
+                      Text(
+                        dateLabel,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+}
+
+class _MemberDetailPill extends StatelessWidget {
+  const _MemberDetailPill({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 16, color: MochiPalette.ink),
+          const SizedBox(width: 6),
+          Text(label, style: Theme.of(context).textTheme.labelLarge),
+        ],
       ),
     );
   }

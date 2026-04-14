@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
@@ -15,6 +17,8 @@ class MemberProvider extends ChangeNotifier {
   bool _isLoading = true;
   bool _isCreating = false;
   int? _deletingMemberId;
+  bool _isLoadingSelectedMemberDetail = false;
+  MemberDetail? _selectedMemberDetail;
   String? _errorMessage;
 
   List<Member> get members => List<Member>.unmodifiable(_members);
@@ -27,9 +31,13 @@ class MemberProvider extends ChangeNotifier {
 
   int? get deletingMemberId => _deletingMemberId;
 
+  bool get isLoadingSelectedMemberDetail => _isLoadingSelectedMemberDetail;
+
   bool get hasMembers => _members.isNotEmpty;
 
   String? get errorMessage => _errorMessage;
+
+  MemberDetail? get selectedMemberDetail => _selectedMemberDetail;
 
   Member get currentMember => _members[_selectedIndex];
 
@@ -51,6 +59,7 @@ class MemberProvider extends ChangeNotifier {
         ..clear()
         ..addAll(members);
       _syncSelection(preferredMemberId: preferredMemberId);
+      await _refreshSelectedMemberDetail(setLoading: false);
       _errorMessage = null;
     } on ApiException catch (error) {
       _errorMessage = error.message;
@@ -116,7 +125,9 @@ class MemberProvider extends ChangeNotifier {
 
     _selectedIndex = index;
     _selectedMemberId = _members[index].id;
+    _selectedMemberDetail = null;
     notifyListeners();
+    unawaited(_refreshSelectedMemberDetail());
   }
 
   void clearError() {
@@ -132,6 +143,7 @@ class MemberProvider extends ChangeNotifier {
     if (_members.isEmpty) {
       _selectedIndex = 0;
       _selectedMemberId = null;
+      _selectedMemberDetail = null;
       return;
     }
 
@@ -154,5 +166,30 @@ class MemberProvider extends ChangeNotifier {
       _selectedIndex = maxIndex;
     }
     _selectedMemberId = _members[_selectedIndex].id;
+  }
+
+  Future<void> _refreshSelectedMemberDetail({bool setLoading = true}) async {
+    final Member? member = currentMemberOrNull;
+    if (member == null) {
+      _selectedMemberDetail = null;
+      _isLoadingSelectedMemberDetail = false;
+      return;
+    }
+
+    if (setLoading) {
+      _isLoadingSelectedMemberDetail = true;
+      notifyListeners();
+    }
+
+    try {
+      _selectedMemberDetail = await _apiService.fetchMemberDetail(member.id);
+      _errorMessage = null;
+    } on ApiException catch (error) {
+      _errorMessage = error.message;
+      _selectedMemberDetail = null;
+    } finally {
+      _isLoadingSelectedMemberDetail = false;
+      notifyListeners();
+    }
   }
 }

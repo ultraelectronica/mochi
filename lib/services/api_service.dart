@@ -51,6 +51,10 @@ class ApiService {
         .toList(growable: false);
   }
 
+  Future<MemberDetail> fetchMemberDetail(int memberId) async {
+    return MemberDetail.fromJson(await _getMap('/members/$memberId'));
+  }
+
   Future<Member> createMember({
     required String name,
     required Color color,

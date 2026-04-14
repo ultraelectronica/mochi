@@ -8,6 +8,7 @@ class Member {
     required this.affection,
     required this.xp,
     required this.note,
+    this.lastSeenAt,
   });
 
   final int id;
@@ -16,6 +17,7 @@ class Member {
   final int affection;
   final int xp;
   final String note;
+  final DateTime? lastSeenAt;
 
   factory Member.fromJson(Map<String, dynamic> json) {
     final int xp = _asInt(json['total_xp']);
@@ -29,6 +31,7 @@ class Member {
       note: (json['note'] as String?)?.trim().isNotEmpty == true
           ? (json['note'] as String).trim()
           : _defaultNote(xp: xp, affection: affection),
+      lastSeenAt: _parseDateTime(json['last_seen_at']),
     );
   }
 
@@ -47,6 +50,7 @@ class Member {
     int? affection,
     int? xp,
     String? note,
+    DateTime? lastSeenAt,
   }) {
     return Member(
       id: id ?? this.id,
@@ -55,8 +59,41 @@ class Member {
       affection: affection ?? this.affection,
       xp: xp ?? this.xp,
       note: note ?? this.note,
+      lastSeenAt: lastSeenAt ?? this.lastSeenAt,
     );
   }
+}
+
+class MemberMoodLog {
+  const MemberMoodLog({required this.mood, required this.createdAt});
+
+  factory MemberMoodLog.fromJson(Map<String, dynamic> json) {
+    return MemberMoodLog(
+      mood: (json['mood'] as String? ?? 'normal').trim(),
+      createdAt: _parseDateTime(json['created_at']) ?? DateTime.now(),
+    );
+  }
+
+  final String mood;
+  final DateTime createdAt;
+}
+
+class MemberDetail {
+  const MemberDetail({required this.member, required this.recentMoodLogs});
+
+  factory MemberDetail.fromJson(Map<String, dynamic> json) {
+    return MemberDetail(
+      member: Member.fromJson(json),
+      recentMoodLogs:
+          (json['recent_mood_logs'] as List<dynamic>? ?? <dynamic>[])
+              .whereType<Map<String, dynamic>>()
+              .map(MemberMoodLog.fromJson)
+              .toList(growable: false),
+    );
+  }
+
+  final Member member;
+  final List<MemberMoodLog> recentMoodLogs;
 }
 
 int _asInt(Object? value) {
@@ -83,4 +120,11 @@ String _defaultNote({required int xp, required int affection}) {
     return 'Still building shared memories with Mochi.';
   }
   return 'Ready to start a first tiny moment with Mochi.';
+}
+
+DateTime? _parseDateTime(Object? raw) {
+  if (raw is! String || raw.trim().isEmpty) {
+    return null;
+  }
+  return DateTime.tryParse(raw)?.toLocal();
 }
