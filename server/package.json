@@ -4,8 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/index.ts",
-    "dev": "node --watch src/index.ts"
+    "start": "node --env-file=.env src/index.ts",
+    "dev": "node --env-file=.env --watch src/index.ts",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop mochi-server",
+    "pm2:restart": "pm2 restart mochi-server",
+    "pm2:reload": "pm2 reload mochi-server",
+    "pm2:logs": "pm2 logs mochi-server",
+    "pm2:status": "pm2 status",
+    "pm2:save": "pm2 save"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
