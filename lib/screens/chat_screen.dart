@@ -15,11 +15,15 @@ class ChatScreen extends StatefulWidget {
     required this.petProvider,
     required this.memberProvider,
     required this.onSendMessage,
+    this.onToggleFullscreen,
+    this.isFullscreen = false,
   });
 
   final PetProvider petProvider;
   final MemberProvider memberProvider;
   final Future<void> Function(String text) onSendMessage;
+  final VoidCallback? onToggleFullscreen;
+  final bool isFullscreen;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -28,6 +32,8 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   late final TextEditingController _controller;
   late final ScrollController _scrollController;
+  bool _headerCollapsed = false;
+  double _headerDragDelta = 0;
 
   @override
   void initState() {
@@ -64,6 +70,40 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  void _setHeaderCollapsed(bool value) {
+    if (_headerCollapsed == value) {
+      return;
+    }
+    setState(() {
+      _headerCollapsed = value;
+    });
+  }
+
+  void _onHeaderDragStart(DragStartDetails details) {
+    _headerDragDelta = 0;
+  }
+
+  void _onHeaderDragUpdate(DragUpdateDetails details) {
+    _headerDragDelta += details.delta.dy;
+    if (!_headerCollapsed && _headerDragDelta < -24) {
+      _setHeaderCollapsed(true);
+      _headerDragDelta = 0;
+    } else if (_headerCollapsed && _headerDragDelta > 24) {
+      _setHeaderCollapsed(false);
+      _headerDragDelta = 0;
+    }
+  }
+
+  void _onHeaderDragEnd(DragEndDetails details) {
+    final double velocity = details.primaryVelocity ?? 0;
+    if (velocity < -180) {
+      _setHeaderCollapsed(true);
+    } else if (velocity > 180) {
+      _setHeaderCollapsed(false);
+    }
+    _headerDragDelta = 0;
+  }
+
   Future<void> _send() async {
     final String text = _controller.text.trim();
     if (text.isEmpty || widget.petProvider.replyPending) {
@@ -80,54 +120,37 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Column(
       children: <Widget>[
-        Container(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-          decoration: pixelCardDecoration(pet.mood.tint),
-          child: Row(
-            children: <Widget>[
-              MemberAvatar(
-                member: Member(
-                  name: 'Mochi',
-                  color: pet.mood.color,
-                  affection: 0,
-                  xp: 0,
-                  note: '',
-                ),
-                size: 44,
-                child: const Icon(
-                  Icons.pets_rounded,
-                  size: 22,
-                  color: MochiPalette.ink,
-                ),
+        GestureDetector(
+          onVerticalDragStart: _onHeaderDragStart,
+          onVerticalDragUpdate: _onHeaderDragUpdate,
+          onVerticalDragEnd: _onHeaderDragEnd,
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: Container(
+              padding: EdgeInsets.fromLTRB(
+                18,
+                _headerCollapsed ? 12 : 16,
+                18,
+                12,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      'Chat room',
-                      style: Theme.of(context).textTheme.titleLarge,
+              decoration: pixelCardDecoration(pet.mood.tint),
+              child: _headerCollapsed
+                  ? _CollapsedChatHeader(
+                      pet: pet,
+                      ttsEnabled: widget.petProvider.ttsEnabled,
+                      isFullscreen: widget.isFullscreen,
+                      onToggleFullscreen: widget.onToggleFullscreen,
+                      onExpand: () => _setHeaderCollapsed(false),
+                    )
+                  : _ExpandedChatHeader(
+                      pet: pet,
+                      ttsEnabled: widget.petProvider.ttsEnabled,
+                      isFullscreen: widget.isFullscreen,
+                      onToggleFullscreen: widget.onToggleFullscreen,
+                      onCollapse: () => _setHeaderCollapsed(true),
                     ),
-                    Text(
-                      '${pet.stage.label} stage, ${pet.mood.label.toLowerCase()} tone, short warm replies.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
-              _ChatBadge(
-                label: widget.petProvider.ttsEnabled
-                    ? 'Voice on'
-                    : 'Voice muted',
-                color: widget.petProvider.ttsEnabled
-                    ? MochiPalette.lightPink
-                    : MochiPalette.cloudBlue,
-                icon: widget.petProvider.ttsEnabled
-                    ? Icons.volume_up_rounded
-                    : Icons.volume_off_rounded,
-              ),
-            ],
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -249,6 +272,218 @@ class _TypingBubble extends StatelessWidget {
   }
 }
 
+class _ExpandedChatHeader extends StatelessWidget {
+  const _ExpandedChatHeader({
+    required this.pet,
+    required this.ttsEnabled,
+    required this.isFullscreen,
+    required this.onToggleFullscreen,
+    required this.onCollapse,
+  });
+
+  final Pet pet;
+  final bool ttsEnabled;
+  final bool isFullscreen;
+  final VoidCallback? onToggleFullscreen;
+  final VoidCallback onCollapse;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            MemberAvatar(
+              member: Member(
+                name: 'Mochi',
+                color: pet.mood.color,
+                affection: 0,
+                xp: 0,
+                note: '',
+              ),
+              size: 44,
+              child: const Icon(
+                Icons.pets_rounded,
+                size: 22,
+                color: MochiPalette.ink,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Chat room',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  Text(
+                    '${pet.stage.label} stage, ${pet.mood.label.toLowerCase()} tone, short warm replies.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+            _ChatHeaderActions(
+              ttsEnabled: ttsEnabled,
+              isFullscreen: isFullscreen,
+              onToggleFullscreen: onToggleFullscreen,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _ChatHeaderHandle(
+          label: 'Drag up to minimize chat room',
+          icon: Icons.keyboard_arrow_up_rounded,
+          onTap: onCollapse,
+        ),
+      ],
+    );
+  }
+}
+
+class _CollapsedChatHeader extends StatelessWidget {
+  const _CollapsedChatHeader({
+    required this.pet,
+    required this.ttsEnabled,
+    required this.isFullscreen,
+    required this.onToggleFullscreen,
+    required this.onExpand,
+  });
+
+  final Pet pet;
+  final bool ttsEnabled;
+  final bool isFullscreen;
+  final VoidCallback? onToggleFullscreen;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            MemberAvatar(
+              member: Member(
+                name: 'Mochi',
+                color: pet.mood.color,
+                affection: 0,
+                xp: 0,
+                note: '',
+              ),
+              size: 36,
+              child: const Icon(
+                Icons.pets_rounded,
+                size: 18,
+                color: MochiPalette.ink,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Chat room',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  Text(
+                    '${pet.mood.label} tone ready',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+            _ChatHeaderActions(
+              ttsEnabled: ttsEnabled,
+              isFullscreen: isFullscreen,
+              onToggleFullscreen: onToggleFullscreen,
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _ChatHeaderHandle(
+          label: 'Drag down to expand chat room',
+          icon: Icons.keyboard_arrow_down_rounded,
+          onTap: onExpand,
+        ),
+      ],
+    );
+  }
+}
+
+class _ChatHeaderActions extends StatelessWidget {
+  const _ChatHeaderActions({
+    required this.ttsEnabled,
+    required this.isFullscreen,
+    required this.onToggleFullscreen,
+  });
+
+  final bool ttsEnabled;
+  final bool isFullscreen;
+  final VoidCallback? onToggleFullscreen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        _ChatBadge(
+          label: ttsEnabled ? 'Voice on' : 'Voice muted',
+          color: ttsEnabled ? MochiPalette.lightPink : MochiPalette.cloudBlue,
+          icon: ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+        ),
+        if (onToggleFullscreen != null)
+          _ChatActionButton(
+            icon: isFullscreen
+                ? Icons.close_fullscreen_rounded
+                : Icons.open_in_full_rounded,
+            label: isFullscreen ? 'Exit full' : 'Full screen',
+            onPressed: onToggleFullscreen!,
+          ),
+      ],
+    );
+  }
+}
+
+class _ChatHeaderHandle extends StatelessWidget {
+  const _ChatHeaderHandle({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Icon(
+              icon,
+              size: 18,
+              color: MochiPalette.ink.withValues(alpha: 0.6),
+            ),
+            const SizedBox(width: 6),
+            Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ChatBadge extends StatelessWidget {
   const _ChatBadge({
     required this.label,
@@ -276,6 +511,45 @@ class _ChatBadge extends StatelessWidget {
           const SizedBox(width: 6),
           Text(label, style: Theme.of(context).textTheme.labelLarge),
         ],
+      ),
+    );
+  }
+}
+
+class _ChatActionButton extends StatelessWidget {
+  const _ChatActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: MochiPalette.ink, width: 2),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 16, color: MochiPalette.ink),
+              const SizedBox(width: 6),
+              Text(label, style: Theme.of(context).textTheme.labelLarge),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -76,6 +76,20 @@ class _MochiShellState extends State<MochiShell> {
     _memberProvider.rewardCurrentMember(xp: 2, affection: 1);
   }
 
+  void _openFullscreenChat() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) {
+          return _FullscreenChatScreen(
+            petProvider: _petProvider,
+            memberProvider: _memberProvider,
+            onSendMessage: _handleSendMessage,
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -86,6 +100,7 @@ class _MochiShellState extends State<MochiShell> {
             petProvider: _petProvider,
             memberProvider: _memberProvider,
             onSendMessage: _handleSendMessage,
+            onToggleFullscreen: _openFullscreenChat,
           ),
           HomeScreen(
             petProvider: _petProvider,
@@ -148,6 +163,51 @@ class _MochiShellState extends State<MochiShell> {
                   onSelected: (int index) {
                     setState(() => _selectedTabIndex = index);
                   },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _FullscreenChatScreen extends StatelessWidget {
+  const _FullscreenChatScreen({
+    required this.petProvider,
+    required this.memberProvider,
+    required this.onSendMessage,
+  });
+
+  final PetProvider petProvider;
+  final MemberProvider memberProvider;
+  final Future<void> Function(String text) onSendMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[petProvider, memberProvider]),
+      builder: (BuildContext context, Widget? child) {
+        return Scaffold(
+          body: Stack(
+            children: <Widget>[
+              const Positioned.fill(child: _PixelBackdrop()),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1180),
+                      child: ChatScreen(
+                        petProvider: petProvider,
+                        memberProvider: memberProvider,
+                        onSendMessage: onSendMessage,
+                        isFullscreen: true,
+                        onToggleFullscreen: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
