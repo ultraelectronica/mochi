@@ -10,7 +10,9 @@ import 'providers/pet_provider.dart';
 import 'services/floating_mochi_service.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/mood_checkin_screen.dart';
 import 'screens/settings_screen.dart';
+import 'widgets/mood_checkin_sheet.dart';
 import 'widgets/create_member_dialog.dart';
 import 'widgets/mochi_bottom_nav_bar.dart';
 
@@ -49,6 +51,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
   int _selectedTabIndex = 1;
   bool _bootstrapping = true;
   String? _bootstrapError;
+  bool _didAutoShowMoodSheetThisSession = false;
 
   @override
   void initState() {
@@ -120,8 +123,50 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         setState(() {
           _bootstrapping = false;
         });
+        _scheduleDailyMoodSheet();
       }
     }
+  }
+
+  void _scheduleDailyMoodSheet() {
+    if (_didAutoShowMoodSheetThisSession) {
+      return;
+    }
+    if (!_petProvider.hasPet || !_memberProvider.hasMembers) {
+      return;
+    }
+    if (_petProvider.moodForMember(_memberProvider.currentMember.name) !=
+        null) {
+      return;
+    }
+    _didAutoShowMoodSheetThisSession = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_showMoodCheckInSheet());
+    });
+  }
+
+  Future<void> _showMoodCheckInSheet() async {
+    await showMoodCheckinSheet(
+      context,
+      petProvider: _petProvider,
+      memberProvider: _memberProvider,
+      onSubmitMood: _handleMoodCheckIn,
+    );
+  }
+
+  void _pushMoodCheckInScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => MoodCheckinScreen(
+          petProvider: _petProvider,
+          memberProvider: _memberProvider,
+          onSubmitMood: _handleMoodCheckIn,
+        ),
+      ),
+    );
   }
 
   Future<void> _refreshRemoteState({bool reconnectRealtime = false}) async {
@@ -181,7 +226,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _handleMoodCheckIn(MochiMood mood) async {
+  Future<bool> _handleMoodCheckIn(MochiMood mood) async {
     final Member member = _memberProvider.currentMember;
 
     try {
@@ -193,17 +238,19 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         if (mounted) {
           _showSnackBar('${member.name} already checked in today.');
         }
-        return;
+        return false;
       }
 
       await _memberProvider.loadMembers(
         setLoading: false,
         preferredMemberId: member.id,
       );
+      return true;
     } catch (error) {
       if (mounted) {
         _showSnackBar(_primaryErrorMessage(error));
       }
+      return false;
     }
   }
 
@@ -382,9 +429,10 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
             onPetTap: () {
               unawaited(_handlePetTap());
             },
-            onCheckInMood: (MochiMood mood) {
-              unawaited(_handleMoodCheckIn(mood));
+            onOpenMoodCheckInSheet: () {
+              unawaited(_showMoodCheckInSheet());
             },
+            onOpenMoodCheckInFullScreen: _pushMoodCheckInScreen,
             onOpenChat: () => setState(() => _selectedTabIndex = 0),
           ),
           SettingsScreen(

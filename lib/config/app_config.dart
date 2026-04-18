@@ -7,6 +7,13 @@ class AppConfig {
     defaultValue: 'http://127.0.0.1:3000',
   );
 
+  /// Must match server `MOCHI_API_KEY` when the server has auth enabled. Pass via
+  /// `--dart-define=MOCHI_API_KEY=...` (same value as in `server/.env`).
+  static const String apiKey = String.fromEnvironment(
+    'MOCHI_API_KEY',
+    defaultValue: '',
+  );
+
   static Uri get serverUri => Uri.parse(serverUrl);
 
   static Uri apiUri(String path, [Map<String, String>? queryParameters]) {

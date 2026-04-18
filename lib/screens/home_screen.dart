@@ -7,7 +7,6 @@ import '../models/pet.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
 import '../widgets/member_avatar.dart';
-import '../widgets/mood_tile.dart';
 import '../widgets/pet_sprite.dart';
 import '../widgets/xp_bar.dart';
 
@@ -17,14 +16,16 @@ class HomeScreen extends StatelessWidget {
     required this.petProvider,
     required this.memberProvider,
     required this.onPetTap,
-    required this.onCheckInMood,
+    required this.onOpenMoodCheckInSheet,
+    required this.onOpenMoodCheckInFullScreen,
     required this.onOpenChat,
   });
 
   final PetProvider petProvider;
   final MemberProvider memberProvider;
   final VoidCallback onPetTap;
-  final ValueChanged<MochiMood> onCheckInMood;
+  final VoidCallback onOpenMoodCheckInSheet;
+  final VoidCallback onOpenMoodCheckInFullScreen;
   final VoidCallback onOpenChat;
 
   @override
@@ -86,13 +87,14 @@ class HomeScreen extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 16),
-              _MoodPanel(
+              _MoodSummaryPanel(
                 currentMember: currentMember,
                 selectedMood: selectedMood,
                 familyCheckIns: petProvider.memberCheckIns,
                 members: memberProvider.members,
                 petMood: pet.mood,
-                onSelectMood: onCheckInMood,
+                onOpenSheet: onOpenMoodCheckInSheet,
+                onOpenFullScreen: onOpenMoodCheckInFullScreen,
               ),
               const SizedBox(height: 16),
               _FeedPanel(entries: petProvider.feedEntries),
@@ -377,14 +379,15 @@ class _ProfilePanel extends StatelessWidget {
   }
 }
 
-class _MoodPanel extends StatelessWidget {
-  const _MoodPanel({
+class _MoodSummaryPanel extends StatelessWidget {
+  const _MoodSummaryPanel({
     required this.currentMember,
     required this.selectedMood,
     required this.familyCheckIns,
     required this.members,
     required this.petMood,
-    required this.onSelectMood,
+    required this.onOpenSheet,
+    required this.onOpenFullScreen,
   });
 
   final Member currentMember;
@@ -392,7 +395,8 @@ class _MoodPanel extends StatelessWidget {
   final Map<String, MochiMood> familyCheckIns;
   final List<Member> members;
   final MochiMood petMood;
-  final ValueChanged<MochiMood> onSelectMood;
+  final VoidCallback onOpenSheet;
+  final VoidCallback onOpenFullScreen;
 
   @override
   Widget build(BuildContext context) {
@@ -408,7 +412,7 @@ class _MoodPanel extends StatelessWidget {
             title: 'Mood check-in',
             subtitle: locked
                 ? '${currentMember.name} already checked in today.'
-                : 'Pick one of the 9 moods to nudge Mochi\'s shared state.',
+                : 'Tap below to pick one of the 9 moods and nudge Mochi\'s shared state.',
           ),
           const SizedBox(height: 10),
           _Badge(
@@ -420,23 +424,6 @@ class _MoodPanel extends StatelessWidget {
           Text(
             selectedMood?.reaction ?? petMood.reaction,
             style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 16),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 3,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 0.95,
-            children: MochiMood.values.map((MochiMood mood) {
-              return MoodTile(
-                mood: mood,
-                selected: selectedMood == mood,
-                enabled: !locked,
-                onTap: () => onSelectMood(mood),
-              );
-            }).toList(),
           ),
           const SizedBox(height: 16),
           Wrap(
@@ -478,6 +465,20 @@ class _MoodPanel extends StatelessWidget {
                 ),
               );
             }).toList(),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onOpenSheet,
+            icon: Icon(locked ? Icons.visibility_rounded : Icons.mood_rounded),
+            label: Text(locked ? 'View family check-ins' : 'Check in'),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: onOpenFullScreen,
+              child: const Text('Open full screen'),
+            ),
           ),
         ],
       ),
