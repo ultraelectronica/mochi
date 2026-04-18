@@ -1,5 +1,6 @@
 import { WebSocket, WebSocketServer } from 'ws'
 
+import { config } from '../config/index.ts'
 import db from '../db/index.ts'
 
 const clients = new Set<WebSocket>()
@@ -11,7 +12,16 @@ const petSelect = `
 `
 
 export function initWS(server: Parameters<typeof WebSocketServer>[0]['server']) {
-  const wsServer = new WebSocketServer({ server })
+  const wsServer = new WebSocketServer({
+    server,
+    verifyClient: (info) => {
+      if (!config.apiKey) {
+        return true
+      }
+      const auth = info.req.headers['authorization']?.trim()
+      return auth === `Bearer ${config.apiKey}`
+    },
+  })
 
   wsServer.on('connection', (socket) => {
     clients.add(socket)
