@@ -66,11 +66,36 @@ lib/
 └── providers/       # Riverpod — pet and member state
 ```
 
-## Getting started (Flutter)
+## Getting started
+
+### Backend (`server/`)
+
+On a PC, from the repo root:
+
+```bash
+cd server
+pnpm install
+cp .env.example .env
+pnpm dev
+```
+
+Optional: set `MOCHI_API_KEY` in `server/.env` so HTTP (except `GET /health`) and WebSocket require `Authorization: Bearer …`. Match the client with `--dart-define=MOCHI_API_KEY=…`.
+
+Full commands, LAN notes, Flutter flags, **llama.cpp + TinyLlama on a Linux PC**, Fish helpers, and the Termux / PM2 flow are in **[docs/server_setup.md](docs/server_setup.md)**. Deeper product context: **[docs/mochi.pdf](docs/mochi.pdf)**.
+
+### Flutter app
 
 ```bash
 flutter pub get
 flutter run
+```
+
+With API auth and a custom server URL:
+
+```bash
+flutter run \
+  --dart-define=MOCHI_SERVER_URL=http://127.0.0.1:3000 \
+  --dart-define=MOCHI_API_KEY=your_shared_secret
 ```
 
 See the [Flutter documentation](https://docs.flutter.dev/) for environment setup and tooling.
