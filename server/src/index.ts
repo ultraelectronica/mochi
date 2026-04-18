@@ -5,6 +5,7 @@ import express from 'express'
 import { startMoodDecayJob } from './jobs/mood-decay.ts'
 import { config } from './config/index.ts'
 import { runMigrations } from './db/migrations.ts'
+import { requireApiKey } from './middleware/auth.ts'
 import chatRoutes from './routes/chat.ts'
 import feedRoutes from './routes/feed.ts'
 import healthRoutes from './routes/health.ts'
@@ -21,7 +22,10 @@ app.use(express.json({ limit: '1mb' }))
 app.use((request, response, next) => {
   response.setHeader('Access-Control-Allow-Origin', '*')
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  response.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization',
+  )
 
   if (request.method === 'OPTIONS') {
     response.status(204).send()
@@ -32,6 +36,8 @@ app.use((request, response, next) => {
 })
 
 app.use('/health', healthRoutes)
+
+app.use(requireApiKey)
 app.use('/pet', petRoutes)
 app.use('/members', membersRoutes)
 app.use('/chat', chatRoutes)
@@ -50,4 +56,11 @@ startMoodDecayJob()
 
 server.listen(config.port, () => {
   console.info(`Mochi server listening on port ${config.port}`)
+  if (config.apiKey) {
+    console.info('API key auth is enabled (MOCHI_API_KEY). Send Authorization: Bearer … on API and WebSocket.')
+  } else {
+    console.warn(
+      'MOCHI_API_KEY is not set: HTTP API (except GET /health) and WebSocket are open. Set MOCHI_API_KEY for local or LAN use.',
+    )
+  }
 })

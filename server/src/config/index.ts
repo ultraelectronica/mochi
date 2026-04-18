@@ -66,6 +66,8 @@ const moods = loadTson<MoodDefinition[]>(
 )
 
 export const config = {
+  /** When non-empty, HTTP (except `/health`) and WebSocket require `Authorization: Bearer …`. */
+  apiKey: process.env.MOCHI_API_KEY?.trim() || '',
   llamaUrl: process.env.LLAMA_URL?.trim() || 'http://127.0.0.1:8080',
   geminiKey: process.env.GEMINI_API_KEY?.trim() || '',
   port: envNumber('PORT', 3000),
