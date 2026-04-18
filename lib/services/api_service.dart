@@ -23,6 +23,20 @@ class ApiService {
 
   final http.Client _client;
 
+  Map<String, String> get _headers {
+    final Map<String, String> base = <String, String>{};
+    final String key = AppConfig.apiKey.trim();
+    if (key.isNotEmpty) {
+      base['Authorization'] = 'Bearer $key';
+    }
+    return base;
+  }
+
+  Map<String, String> _jsonHeaders() => <String, String>{
+    ..._headers,
+    'Content-Type': 'application/json',
+  };
+
   Future<({bool serverOnline, bool llamaOnline})> fetchHealth() async {
     final Map<String, dynamic> json = await _getMap('/health');
     return (
@@ -218,19 +232,19 @@ class ApiService {
       if (method == 'POST') {
         response = await _client.post(
           uri,
-          headers: <String, String>{'Content-Type': 'application/json'},
+          headers: _jsonHeaders(),
           body: jsonEncode(body),
         );
       } else if (method == 'PATCH') {
         response = await _client.patch(
           uri,
-          headers: <String, String>{'Content-Type': 'application/json'},
+          headers: _jsonHeaders(),
           body: jsonEncode(body),
         );
       } else if (method == 'DELETE') {
-        response = await _client.delete(uri);
+        response = await _client.delete(uri, headers: _headers);
       } else {
-        response = await _client.get(uri);
+        response = await _client.get(uri, headers: _headers);
       }
     } catch (_) {
       throw const ApiException('Unable to reach the Mochi server');

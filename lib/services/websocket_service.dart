@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../config/app_config.dart';
+import 'ws_channel_stub.dart' if (dart.library.io) 'ws_channel_io.dart';
 
 class WebSocketService {
   WebSocketService();
@@ -20,8 +21,14 @@ class WebSocketService {
     await disconnect();
 
     try {
-      final WebSocketChannel channel = WebSocketChannel.connect(
+      final Map<String, String> headers = <String, String>{};
+      final String key = AppConfig.apiKey.trim();
+      if (key.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $key';
+      }
+      final WebSocketChannel channel = connectMochiWebSocket(
         AppConfig.webSocketUri,
+        headers,
       );
       _channel = channel;
       _subscription = channel.stream.listen(
