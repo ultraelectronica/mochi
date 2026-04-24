@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../config/app_config.dart';
+import 'session_store.dart';
 import 'ws_channel_stub.dart' if (dart.library.io) 'ws_channel_io.dart';
 
 class WebSocketService {
@@ -25,6 +26,10 @@ class WebSocketService {
       final String key = AppConfig.apiKey.trim();
       if (key.isNotEmpty) {
         headers['Authorization'] = 'Bearer $key';
+      }
+      final String sessionToken = SessionStore.instance.sessionToken;
+      if (sessionToken.isNotEmpty) {
+        headers['X-Mochi-Session'] = sessionToken;
       }
       final WebSocketChannel channel = connectMochiWebSocket(
         AppConfig.webSocketUri,

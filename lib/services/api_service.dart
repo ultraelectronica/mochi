@@ -4,19 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../models/auth_session.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
+import 'session_store.dart';
 
 class ApiException implements Exception {
-  const ApiException(this.message, {this.statusCode});
+  const ApiException(
+    this.message, {
+    this.statusCode,
+    this.kind = ApiErrorKind.generic,
+  });
 
   final String message;
   final int? statusCode;
+  final ApiErrorKind kind;
+
+  bool get isOffline => kind == ApiErrorKind.offline;
 
   @override
   String toString() => message;
 }
+
+enum ApiErrorKind { generic, offline }
 
 class ApiService {
   ApiService({http.Client? client}) : _client = client ?? http.Client();
@@ -28,6 +39,10 @@ class ApiService {
     final String key = AppConfig.apiKey.trim();
     if (key.isNotEmpty) {
       base['Authorization'] = 'Bearer $key';
+    }
+    final String sessionToken = SessionStore.instance.sessionToken;
+    if (sessionToken.isNotEmpty) {
+      base['X-Mochi-Session'] = sessionToken;
     }
     return base;
   }
@@ -43,6 +58,58 @@ class ApiService {
       serverOnline: json['status'] == 'ok',
       llamaOnline: json['llamaOnline'] == true,
     );
+  }
+
+  Future<AuthSession> bootstrap({
+    required String householdName,
+    required String adminName,
+    required String username,
+    required String password,
+    required Color color,
+  }) async {
+    return AuthSession.fromJson(
+      await _sendMap('POST', '/auth/bootstrap', <String, dynamic>{
+        'household_name': householdName,
+        'admin_name': adminName,
+        'username': username,
+        'password': password,
+        'avatar_color': _hexFromColor(color),
+      }),
+    );
+  }
+
+  Future<AuthSession> login({
+    required String householdCode,
+    required String username,
+    required String password,
+  }) async {
+    return AuthSession.fromJson(
+      await _sendMap('POST', '/auth/login', <String, dynamic>{
+        'household_code': householdCode,
+        'username': username,
+        'password': password,
+      }),
+    );
+  }
+
+  Future<AuthSession> acceptInvite({
+    required String inviteCode,
+    required String password,
+  }) async {
+    return AuthSession.fromJson(
+      await _sendMap('POST', '/auth/accept-invite', <String, dynamic>{
+        'invite_code': inviteCode,
+        'password': password,
+      }),
+    );
+  }
+
+  Future<AuthSession> fetchSession() async {
+    return AuthSession.fromJson(await _getMap('/auth/me'));
+  }
+
+  Future<void> logout() async {
+    await _request('POST', '/auth/logout', body: <String, dynamic>{});
   }
 
   Future<Pet> fetchPet() async {
@@ -69,16 +136,26 @@ class ApiService {
     return MemberDetail.fromJson(await _getMap('/members/$memberId'));
   }
 
-  Future<Member> createMember({
+  Future<CreatedMemberInvite> createMember({
     required String name,
+    required String username,
     required Color color,
   }) async {
     final Map<String, dynamic> json = await _sendMap(
       'POST',
       '/members',
-      <String, dynamic>{'name': name, 'avatar_color': _hexFromColor(color)},
+      <String, dynamic>{
+        'name': name,
+        'username': username,
+        'avatar_color': _hexFromColor(color),
+      },
     );
-    return Member.fromJson(json);
+    return CreatedMemberInvite(
+      member: Member.fromJson(
+        json['member'] as Map<String, dynamic>? ?? <String, dynamic>{},
+      ),
+      inviteCode: (json['invite_code'] as String? ?? '').trim(),
+    );
   }
 
   Future<void> deleteMember(int memberId) async {
@@ -104,7 +181,7 @@ class ApiService {
     final Map<String, dynamic> json = await _sendMap(
       'POST',
       '/chat',
-      <String, dynamic>{'member_id': memberId, 'text': text},
+      <String, dynamic>{'text': text},
     );
 
     return (
@@ -122,7 +199,7 @@ class ApiService {
     final Map<String, dynamic> json = await _sendMap(
       'POST',
       '/mood/checkin',
-      <String, dynamic>{'member_id': memberId, 'mood': mood.name},
+      <String, dynamic>{'mood': mood.name},
     );
 
     return (
@@ -137,7 +214,7 @@ class ApiService {
     final Map<String, dynamic> json = await _sendMap(
       'POST',
       '/pet/tap',
-      <String, dynamic>{'member_id': memberId},
+      <String, dynamic>{},
     );
 
     return (
@@ -148,19 +225,17 @@ class ApiService {
     );
   }
 
-  Future<Map<String, MochiMood>> fetchTodayMoodMap() async {
+  Future<Map<int, MochiMood>> fetchTodayMoodMap() async {
     final List<dynamic> json = await _getList('/mood/log');
-    final Map<String, MochiMood> moods = <String, MochiMood>{};
+    final Map<int, MochiMood> moods = <int, MochiMood>{};
 
     for (final Map<String, dynamic> row
         in json.whereType<Map<String, dynamic>>()) {
-      final String? memberName = (row['member_name'] as String?)?.trim();
-      if (memberName == null || memberName.isEmpty) {
+      final int memberId = _asInt(row['member_id']);
+      if (memberId <= 0) {
         continue;
       }
-      moods[memberName] = mochiMoodFromString(
-        row['mood'] as String? ?? 'normal',
-      );
+      moods[memberId] = mochiMoodFromString(row['mood'] as String? ?? 'normal');
     }
 
     return moods;
@@ -247,7 +322,10 @@ class ApiService {
         response = await _client.get(uri, headers: _headers);
       }
     } catch (_) {
-      throw const ApiException('Unable to reach the Mochi server');
+      throw const ApiException(
+        'Unable to reach the Mochi server',
+        kind: ApiErrorKind.offline,
+      );
     }
 
     final String rawBody = response.body.trim();
