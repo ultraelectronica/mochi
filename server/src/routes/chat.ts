@@ -2,31 +2,34 @@ import express from 'express'
 
 import { config } from '../config/index.ts'
 import db from '../db/index.ts'
+import { getRequestAuth } from '../middleware/auth.ts'
 import { getReply } from '../services/ai.ts'
 import { recalculateMood } from '../services/mood-engine.ts'
+import { getPet } from '../services/pets.ts'
 import { buildPrompt } from '../services/prompt.ts'
 import { awardXP, checkStagePromotion } from '../services/xp.ts'
-import { broadcast } from '../ws/index.ts'
+import { broadcastHousehold } from '../ws/index.ts'
 
 const router = express.Router()
 
-const petSelect = `
-  SELECT id, name, stage, total_xp, mood, mood_score, last_interaction_at, created_at
-  FROM pet
-  WHERE id = 1
-`
-
 router.post('/', async (request, response) => {
-  const memberId = Number(request.body?.member_id)
+  const auth = getRequestAuth(request)
+  const memberId = auth.memberId
   const text = typeof request.body?.text === 'string' ? request.body.text.trim() : ''
   const inputType = request.body?.input_type === 'voice' ? 'voice' : 'text'
 
-  if (!Number.isInteger(memberId) || memberId <= 0 || !text) {
-    response.status(400).json({ error: 'member_id and text are required' })
+  if (!text) {
+    response.status(400).json({ error: 'text is required' })
     return
   }
 
-  const member = db.prepare('SELECT id, name FROM members WHERE id = ?').get(memberId) as
+  const member = db
+    .prepare(
+      `SELECT id, name
+       FROM members
+       WHERE id = ? AND household_id = ?`,
+    )
+    .get(memberId, auth.householdId) as
     | { id: number; name: string }
     | undefined
 
@@ -35,16 +38,17 @@ router.post('/', async (request, response) => {
     return
   }
 
-  const pet = db.prepare(petSelect).get() as { mood: string }
+  const pet = getPet(auth.householdId) as { mood: string }
   const memories = db
     .prepare(
       `SELECT content
        FROM memories
-       WHERE member_id = ?
+       WHERE household_id = ?
+         AND member_id = ?
        ORDER BY weight DESC, datetime(created_at) DESC
        LIMIT 3`,
     )
-    .all(memberId) as Array<{ content: string }>
+    .all(auth.householdId, memberId) as Array<{ content: string }>
 
   const prompt = buildPrompt({
     memberName: member.name,
@@ -55,18 +59,18 @@ router.post('/', async (request, response) => {
 
   try {
     const reply = await getReply(prompt)
-    const xpAwarded = awardXP({ memberId, amount: config.xpPerChat })
+    const xpAwarded = awardXP({ householdId: auth.householdId, memberId, amount: config.xpPerChat })
 
     db.prepare(
-      `INSERT INTO interactions (member_id, input_text, response_text, input_type, xp_awarded)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(memberId, text, reply, inputType, xpAwarded)
+      `INSERT INTO interactions (household_id, member_id, input_text, response_text, input_type, xp_awarded)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(auth.householdId, memberId, text, reply, inputType, xpAwarded)
 
-    const promoted = checkStagePromotion()
-    recalculateMood()
+    const promoted = checkStagePromotion(auth.householdId)
+    recalculateMood(auth.householdId)
 
-    const updatedPet = db.prepare(petSelect).get()
-    broadcast({ type: 'pet.updated', pet: updatedPet, promoted })
+    const updatedPet = getPet(auth.householdId)
+    broadcastHousehold(auth.householdId, { type: 'pet.updated', pet: updatedPet, promoted })
 
     response.json({ reply, pet: updatedPet })
   } catch (error) {
@@ -76,6 +80,7 @@ router.post('/', async (request, response) => {
 })
 
 router.get('/', (request, response) => {
+  const auth = getRequestAuth(request)
   const requestedLimit = Number(request.query.limit)
   const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 30
 
@@ -92,13 +97,14 @@ router.get('/', (request, response) => {
        FROM (
          SELECT *
          FROM interactions
+         WHERE household_id = ?
          ORDER BY datetime(created_at) DESC, id DESC
          LIMIT ?
        ) AS recent
-       JOIN members ON members.id = recent.member_id
+        JOIN members ON members.id = recent.member_id
        ORDER BY datetime(recent.created_at) ASC, recent.id ASC`,
     )
-    .all(limit)
+    .all(auth.householdId, limit)
 
   response.json(interactions)
 })
