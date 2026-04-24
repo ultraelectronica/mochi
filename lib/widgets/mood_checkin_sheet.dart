@@ -22,7 +22,7 @@ Future<void> showMoodCheckinSheet(
         builder: (BuildContext context, Widget? child) {
           final pet = petProvider.pet;
           final currentMember = memberProvider.currentMember;
-          final selectedMood = petProvider.moodForMember(currentMember.name);
+          final selectedMood = petProvider.moodForMember(currentMember.id);
 
           return Padding(
             padding: EdgeInsets.only(
