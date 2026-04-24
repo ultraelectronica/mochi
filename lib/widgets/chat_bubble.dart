@@ -29,6 +29,9 @@ class ChatBubble extends StatelessWidget {
       affection: 0,
       xp: 0,
       note: '',
+      username: '',
+      isAdmin: false,
+      invitePending: false,
     );
 
     return Row(

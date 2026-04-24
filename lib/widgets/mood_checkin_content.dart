@@ -20,7 +20,7 @@ class MoodCheckinContent extends StatelessWidget {
 
   final Member currentMember;
   final MochiMood? selectedMood;
-  final Map<String, MochiMood> familyCheckIns;
+  final Map<int, MochiMood> familyCheckIns;
   final List<Member> members;
   final MochiMood petMood;
   final Future<bool> Function(MochiMood mood) onSubmitMood;
@@ -74,7 +74,7 @@ class MoodCheckinContent extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: members.map((Member member) {
-            final MochiMood? mood = familyCheckIns[member.name];
+            final MochiMood? mood = familyCheckIns[member.id];
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(

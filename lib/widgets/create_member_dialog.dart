@@ -3,9 +3,14 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 
 class MemberDraft {
-  const MemberDraft({required this.name, required this.color});
+  const MemberDraft({
+    required this.name,
+    required this.username,
+    required this.color,
+  });
 
   final String name;
+  final String username;
   final Color color;
 }
 
@@ -18,6 +23,7 @@ class CreateMemberDialog extends StatefulWidget {
 
 class _CreateMemberDialogState extends State<CreateMemberDialog> {
   late final TextEditingController _nameController = TextEditingController();
+  late final TextEditingController _usernameController = TextEditingController();
 
   final List<Color> _colors = <Color>[
     MochiPalette.sky,
@@ -33,18 +39,26 @@ class _CreateMemberDialogState extends State<CreateMemberDialog> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     super.dispose();
   }
 
   void _submit() {
     final String name = _nameController.text.trim();
-    if (name.isEmpty) {
+    final String username = _usernameController.text.trim();
+    if (name.isEmpty || username.isEmpty) {
       return;
     }
 
     Navigator.of(
       context,
-    ).pop(MemberDraft(name: name, color: _colors[_selectedColorIndex]));
+    ).pop(
+      MemberDraft(
+        name: name,
+        username: username,
+        color: _colors[_selectedColorIndex],
+      ),
+    );
   }
 
   @override
@@ -60,11 +74,20 @@ class _CreateMemberDialogState extends State<CreateMemberDialog> {
             TextField(
               controller: _nameController,
               autofocus: true,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submit(),
+              textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
                 labelText: 'Name',
                 hintText: 'Mom, Dad, Lea...',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _usernameController,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(
+                labelText: 'Username',
+                hintText: 'lea, dad.01, alex',
               ),
             ),
             const SizedBox(height: 16),
