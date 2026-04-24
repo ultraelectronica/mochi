@@ -5,7 +5,8 @@ import express from 'express'
 import { startMoodDecayJob } from './jobs/mood-decay.ts'
 import { config } from './config/index.ts'
 import { runMigrations } from './db/migrations.ts'
-import { requireApiKey } from './middleware/auth.ts'
+import { requireAccount, requireApiKey } from './middleware/auth.ts'
+import authRoutes from './routes/auth.ts'
 import chatRoutes from './routes/chat.ts'
 import feedRoutes from './routes/feed.ts'
 import healthRoutes from './routes/health.ts'
@@ -24,7 +25,7 @@ app.use((request, response, next) => {
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
   response.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization',
+    'Content-Type, Authorization, X-Mochi-Session',
   )
 
   if (request.method === 'OPTIONS') {
@@ -38,6 +39,8 @@ app.use((request, response, next) => {
 app.use('/health', healthRoutes)
 
 app.use(requireApiKey)
+app.use('/auth', authRoutes)
+app.use(requireAccount)
 app.use('/pet', petRoutes)
 app.use('/members', membersRoutes)
 app.use('/chat', chatRoutes)

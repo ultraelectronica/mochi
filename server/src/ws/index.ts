@@ -1,31 +1,51 @@
 import { WebSocket, WebSocketServer } from 'ws'
 
 import { config } from '../config/index.ts'
-import db from '../db/index.ts'
+import { getAuthContextFromSessionToken, sessionHeaderName } from '../services/auth.ts'
+import { getPet } from '../services/pets.ts'
 
-const clients = new Set<WebSocket>()
+const clients = new Map<WebSocket, number>()
 
-const petSelect = `
-  SELECT id, name, stage, total_xp, mood, mood_score, last_interaction_at, created_at
-  FROM pet
-  WHERE id = 1
-`
+function readSessionHeader(headers: Record<string, string | string[] | undefined>) {
+  const header = headers[sessionHeaderName]
+
+  if (typeof header === 'string') {
+    return header.trim()
+  }
+
+  if (Array.isArray(header)) {
+    return header[0]?.trim() || ''
+  }
+
+  return ''
+}
 
 export function initWS(server: Parameters<typeof WebSocketServer>[0]['server']) {
   const wsServer = new WebSocketServer({
     server,
     verifyClient: (info) => {
-      if (!config.apiKey) {
-        return true
-      }
       const auth = info.req.headers['authorization']?.trim()
-      return auth === `Bearer ${config.apiKey}`
+
+      if (config.apiKey && auth !== `Bearer ${config.apiKey}`) {
+        return false
+      }
+
+      const sessionToken = readSessionHeader(info.req.headers)
+      return Boolean(sessionToken && getAuthContextFromSessionToken(sessionToken))
     },
   })
 
-  wsServer.on('connection', (socket) => {
-    clients.add(socket)
-    socket.send(JSON.stringify({ type: 'welcome', pet: db.prepare(petSelect).get() }))
+  wsServer.on('connection', (socket, request) => {
+    const sessionToken = readSessionHeader(request.headers)
+    const auth = getAuthContextFromSessionToken(sessionToken)
+
+    if (!auth) {
+      socket.close()
+      return
+    }
+
+    clients.set(socket, auth.householdId)
+    socket.send(JSON.stringify({ type: 'welcome', pet: getPet(auth.householdId) }))
 
     socket.on('close', () => {
       clients.delete(socket)
@@ -39,10 +59,14 @@ export function initWS(server: Parameters<typeof WebSocketServer>[0]['server']) 
   return wsServer
 }
 
-export function broadcast(payload: unknown) {
+export function broadcastHousehold(householdId: number, payload: unknown) {
   const message = JSON.stringify(payload)
 
-  for (const client of clients) {
+  for (const [client, clientHouseholdId] of clients) {
+    if (clientHouseholdId !== householdId) {
+      continue
+    }
+
     if (client.readyState === WebSocket.OPEN) {
       client.send(message)
       continue
