@@ -8,6 +8,9 @@ class Member {
     required this.affection,
     required this.xp,
     required this.note,
+    required this.username,
+    required this.isAdmin,
+    required this.invitePending,
     this.lastSeenAt,
   });
 
@@ -17,6 +20,9 @@ class Member {
   final int affection;
   final int xp;
   final String note;
+  final String username;
+  final bool isAdmin;
+  final bool invitePending;
   final DateTime? lastSeenAt;
 
   factory Member.fromJson(Map<String, dynamic> json) {
@@ -27,12 +33,16 @@ class Member {
       name: (json['name'] as String? ?? 'Family member').trim(),
       color: _colorFromHex(json['avatar_color'] as String? ?? '#1D9E75'),
       affection: affection,
-      xp: xp,
-      note: (json['note'] as String?)?.trim().isNotEmpty == true
-          ? (json['note'] as String).trim()
-          : _defaultNote(xp: xp, affection: affection),
-      lastSeenAt: _parseDateTime(json['last_seen_at']),
-    );
+        xp: xp,
+        note: (json['note'] as String?)?.trim().isNotEmpty == true
+            ? (json['note'] as String).trim()
+            : _defaultNote(xp: xp, affection: affection),
+        username: (json['username'] as String? ?? '').trim(),
+        isAdmin: json['is_admin'] == true || json['is_admin'] == 1,
+        invitePending:
+            json['invite_pending'] == true || json['invite_pending'] == 1,
+        lastSeenAt: _parseDateTime(json['last_seen_at']),
+      );
   }
 
   String get initials {
@@ -50,6 +60,9 @@ class Member {
     int? affection,
     int? xp,
     String? note,
+    String? username,
+    bool? isAdmin,
+    bool? invitePending,
     DateTime? lastSeenAt,
   }) {
     return Member(
@@ -59,9 +72,19 @@ class Member {
       affection: affection ?? this.affection,
       xp: xp ?? this.xp,
       note: note ?? this.note,
+      username: username ?? this.username,
+      isAdmin: isAdmin ?? this.isAdmin,
+      invitePending: invitePending ?? this.invitePending,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
     );
   }
+}
+
+class CreatedMemberInvite {
+  const CreatedMemberInvite({required this.member, required this.inviteCode});
+
+  final Member member;
+  final String inviteCode;
 }
 
 class MemberMoodLog {
