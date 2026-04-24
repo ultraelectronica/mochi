@@ -1,47 +1,55 @@
 import { config, getMoodDefinition } from '../config/index.ts'
 import db from '../db/index.ts'
+import { getPet } from './pets.ts'
 
 type AwardXpInput = {
+  householdId: number
   memberId: number
   amount: number
 }
 
-export function awardXP({ memberId, amount }: AwardXpInput) {
-  const pet = db.prepare('SELECT mood FROM pet WHERE id = 1').get() as { mood: string }
+export function awardXP({ householdId, memberId, amount }: AwardXpInput) {
+  const pet = getPet(householdId) as { mood: string }
   const modifier = getMoodDefinition(pet.mood)?.xpModifier || 1
   const adjustedAmount = Math.max(1, Math.round(amount * modifier))
   const affectionGain = Math.max(1, Math.ceil(adjustedAmount / 2))
   const now = new Date().toISOString()
 
   db.transaction(() => {
-    const member = db.prepare('SELECT id FROM members WHERE id = ?').get(memberId)
+    const member = db
+      .prepare(
+        `SELECT id
+         FROM members
+         WHERE id = ? AND household_id = ?`,
+      )
+      .get(memberId, householdId)
 
     if (!member) {
       throw new Error(`Member ${memberId} does not exist`)
     }
 
     db.prepare(
-      'UPDATE members SET total_xp = total_xp + ?, last_seen_at = ? WHERE id = ?',
-    ).run(adjustedAmount, now, memberId)
+      'UPDATE members SET total_xp = total_xp + ?, last_seen_at = ? WHERE id = ? AND household_id = ?',
+    ).run(adjustedAmount, now, memberId, householdId)
 
     db.prepare(
-      'UPDATE pet SET total_xp = total_xp + ?, last_interaction_at = ? WHERE id = 1',
-    ).run(adjustedAmount, now)
+      'UPDATE pets SET total_xp = total_xp + ?, last_interaction_at = ? WHERE household_id = ?',
+    ).run(adjustedAmount, now, householdId)
 
     db.prepare(
-      `INSERT INTO affection (member_id, score, updated_at)
-       VALUES (?, ?, ?)
+      `INSERT INTO affection (household_id, member_id, score, updated_at)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(member_id) DO UPDATE SET
-         score = affection.score + excluded.score,
-         updated_at = excluded.updated_at`,
-    ).run(memberId, affectionGain, now)
+          score = affection.score + excluded.score,
+          updated_at = excluded.updated_at`,
+    ).run(householdId, memberId, affectionGain, now)
   })()
 
   return adjustedAmount
 }
 
-export function checkStagePromotion() {
-  const pet = db.prepare('SELECT stage, total_xp FROM pet WHERE id = 1').get() as {
+export function checkStagePromotion(householdId: number) {
+  const pet = db.prepare('SELECT stage, total_xp FROM pets WHERE household_id = ?').get(householdId) as {
     stage: number
     total_xp: number
   }
@@ -63,10 +71,13 @@ export function checkStagePromotion() {
   )
 
   db.transaction(() => {
-    db.prepare('UPDATE pet SET stage = ? WHERE id = 1').run(nextStage)
+    db.prepare('UPDATE pets SET stage = ? WHERE household_id = ?').run(nextStage, householdId)
 
     for (const stage of crossedStages) {
-      db.prepare('INSERT INTO stage_events (stage) VALUES (?)').run(stage.stage)
+      db.prepare('INSERT INTO stage_events (household_id, stage) VALUES (?, ?)').run(
+        householdId,
+        stage.stage,
+      )
     }
   })()
 

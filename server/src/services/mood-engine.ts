@@ -57,19 +57,20 @@ function pickMood(score: number, recentMoods: string[], recentChats: number, ina
   return 'normal'
 }
 
-export function recalculateMood() {
+export function recalculateMood(householdId: number) {
   const pet = db
-    .prepare('SELECT mood, mood_score, last_interaction_at FROM pet WHERE id = 1')
-    .get() as { mood: string; mood_score: number; last_interaction_at: string | null }
+    .prepare('SELECT mood, mood_score, last_interaction_at FROM pets WHERE household_id = ?')
+    .get(householdId) as { mood: string; mood_score: number; last_interaction_at: string | null }
 
   const recentMoodRows = db
     .prepare(
       `SELECT mood
        FROM mood_log
-       WHERE datetime(created_at) >= datetime('now', '-3 hours')
+       WHERE household_id = ?
+         AND datetime(created_at) >= datetime('now', '-3 hours')
        ORDER BY datetime(created_at) DESC`,
     )
-    .all() as Array<{ mood: string }>
+    .all(householdId) as Array<{ mood: string }>
 
   const recentChats = Number(
     (
@@ -77,9 +78,10 @@ export function recalculateMood() {
         .prepare(
           `SELECT COUNT(*) AS count
            FROM interactions
-           WHERE datetime(created_at) >= datetime('now', '-1 hour')`,
+           WHERE household_id = ?
+             AND datetime(created_at) >= datetime('now', '-1 hour')`,
         )
-        .get() as { count: number }
+        .get(householdId) as { count: number }
     ).count,
   )
 
@@ -110,7 +112,11 @@ export function recalculateMood() {
     inactivityHours,
   )
 
-  db.prepare('UPDATE pet SET mood = ?, mood_score = ? WHERE id = 1').run(mood, score)
+  db.prepare('UPDATE pets SET mood = ?, mood_score = ? WHERE household_id = ?').run(
+    mood,
+    score,
+    householdId,
+  )
 
   return mood
 }
