@@ -22,7 +22,7 @@ class PetProvider extends ChangeNotifier {
   List<ChatEntry> _chatEntries = <ChatEntry>[];
   List<ActivityEntry> _feedEntries = <ActivityEntry>[];
   List<MemorySnippet> _memories = <MemorySnippet>[];
-  Map<String, MochiMood> _memberCheckIns = <String, MochiMood>{};
+  Map<int, MochiMood> _memberCheckIns = <int, MochiMood>{};
 
   bool _serverOnline = false;
   bool _llamaOnline = false;
@@ -38,8 +38,8 @@ class PetProvider extends ChangeNotifier {
       List<ActivityEntry>.unmodifiable(_feedEntries);
   List<MemorySnippet> get memories =>
       List<MemorySnippet>.unmodifiable(_memories);
-  Map<String, MochiMood> get memberCheckIns =>
-      Map<String, MochiMood>.unmodifiable(_memberCheckIns);
+  Map<int, MochiMood> get memberCheckIns =>
+      Map<int, MochiMood>.unmodifiable(_memberCheckIns);
   bool get serverOnline => _serverOnline;
   bool get llamaOnline => _llamaOnline;
   bool get ttsEnabled => _ttsEnabled;
@@ -49,7 +49,7 @@ class PetProvider extends ChangeNotifier {
   bool get hasPet => _pet != null;
   String? get errorMessage => _errorMessage;
 
-  MochiMood? moodForMember(String memberName) => _memberCheckIns[memberName];
+  MochiMood? moodForMember(int memberId) => _memberCheckIns[memberId];
 
   String greetingFor(String memberName) => switch (pet.mood) {
     MochiMood.happy => 'Hi $memberName. I kept the room bright for you.',
@@ -123,7 +123,7 @@ class PetProvider extends ChangeNotifier {
       _pet = results[0] as Pet;
       _memories = results[1] as List<MemorySnippet>;
       _feedEntries = results[2] as List<ActivityEntry>;
-      _memberCheckIns = results[3] as Map<String, MochiMood>;
+      _memberCheckIns = results[3] as Map<int, MochiMood>;
       if (includeChat) {
         _chatEntries = results[4] as List<ChatEntry>;
       }
@@ -230,6 +230,21 @@ class PetProvider extends ChangeNotifier {
       _applyError(error);
       rethrow;
     }
+  }
+
+  Future<void> clearSession() async {
+    await _webSocketSubscription?.cancel();
+    await _webSocketService.disconnect();
+    _webSocketSubscription = null;
+    _pet = null;
+    _chatEntries = <ChatEntry>[];
+    _feedEntries = <ActivityEntry>[];
+    _memories = <MemorySnippet>[];
+    _memberCheckIns = <int, MochiMood>{};
+    _replyPending = false;
+    _errorMessage = null;
+    _isLoading = false;
+    notifyListeners();
   }
 
   void setTtsEnabled(bool value) {

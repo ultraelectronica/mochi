@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../models/auth_session.dart';
 import '../models/member.dart';
 import '../services/api_service.dart';
 
@@ -13,12 +14,14 @@ class MemberProvider extends ChangeNotifier {
 
   final List<Member> _members = <Member>[];
   int _selectedIndex = 0;
+  int? _currentMemberId;
   int? _selectedMemberId;
   bool _isLoading = true;
   bool _isCreating = false;
   int? _deletingMemberId;
   bool _isLoadingSelectedMemberDetail = false;
   MemberDetail? _selectedMemberDetail;
+  bool _isAdmin = false;
   String? _errorMessage;
 
   List<Member> get members => List<Member>.unmodifiable(_members);
@@ -34,15 +37,44 @@ class MemberProvider extends ChangeNotifier {
   bool get isLoadingSelectedMemberDetail => _isLoadingSelectedMemberDetail;
 
   bool get hasMembers => _members.isNotEmpty;
+  bool get isAdmin => _isAdmin;
 
   String? get errorMessage => _errorMessage;
 
   MemberDetail? get selectedMemberDetail => _selectedMemberDetail;
 
-  Member get currentMember => _members[_selectedIndex];
+  Member get currentMember => currentMemberOrNull ?? _members[_selectedIndex];
 
-  Member? get currentMemberOrNull =>
-      _members.isEmpty ? null : _members[_selectedIndex];
+  Member? get currentMemberOrNull {
+    if (_members.isEmpty) {
+      return null;
+    }
+
+    for (final Member member in _members) {
+      if (member.id == _currentMemberId) {
+        return member;
+      }
+    }
+
+    return _members[_selectedIndex];
+  }
+
+  void configureSession(AuthSession session) {
+    _currentMemberId = session.member.id;
+    _selectedMemberId ??= session.member.id;
+    _isAdmin = session.account.isAdmin;
+  }
+
+  void clearSession() {
+    _members.clear();
+    _selectedIndex = 0;
+    _currentMemberId = null;
+    _selectedMemberId = null;
+    _selectedMemberDetail = null;
+    _isAdmin = false;
+    _errorMessage = null;
+    notifyListeners();
+  }
 
   Future<void> loadMembers({
     bool setLoading = true,
@@ -70,8 +102,9 @@ class MemberProvider extends ChangeNotifier {
     }
   }
 
-  Future<Member> createMember({
+  Future<CreatedMemberInvite> createMember({
     required String name,
+    required String username,
     required Color color,
   }) async {
     _isCreating = true;
@@ -79,12 +112,13 @@ class MemberProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final Member created = await _apiService.createMember(
+      final CreatedMemberInvite created = await _apiService.createMember(
         name: name,
+        username: username,
         color: color,
       );
-      await loadMembers(setLoading: false, preferredMemberId: created.id);
-      return currentMember;
+      await loadMembers(setLoading: false, preferredMemberId: created.member.id);
+      return created;
     } on ApiException catch (error) {
       _errorMessage = error.message;
       rethrow;
@@ -99,9 +133,8 @@ class MemberProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final int? preferredMemberId = currentMemberOrNull?.id == member.id
-        ? null
-        : currentMemberOrNull?.id;
+    final int? preferredMemberId =
+        currentMemberOrNull?.id == member.id ? null : _selectedMemberId;
 
     try {
       await _apiService.deleteMember(member.id);
@@ -142,12 +175,18 @@ class MemberProvider extends ChangeNotifier {
   void _syncSelection({int? preferredMemberId}) {
     if (_members.isEmpty) {
       _selectedIndex = 0;
+      _currentMemberId = null;
       _selectedMemberId = null;
       _selectedMemberDetail = null;
       return;
     }
 
-    final int? targetMemberId = preferredMemberId ?? _selectedMemberId;
+    _currentMemberId ??= _members.first.id;
+    if (_members.every((Member member) => member.id != _currentMemberId)) {
+      _currentMemberId = _members.first.id;
+    }
+
+    final int? targetMemberId = preferredMemberId ?? _selectedMemberId ?? _currentMemberId;
     if (targetMemberId != null) {
       final int preservedIndex = _members.indexWhere(
         (Member member) => member.id == targetMemberId,
@@ -159,11 +198,9 @@ class MemberProvider extends ChangeNotifier {
       }
     }
 
-    final int maxIndex = _members.length - 1;
+    _selectedIndex = _members.indexWhere((Member member) => member.id == _currentMemberId);
     if (_selectedIndex < 0) {
       _selectedIndex = 0;
-    } else if (_selectedIndex > maxIndex) {
-      _selectedIndex = maxIndex;
     }
     _selectedMemberId = _members[_selectedIndex].id;
   }
