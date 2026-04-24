@@ -26,7 +26,7 @@ class MoodCheckinScreen extends StatelessWidget {
       builder: (BuildContext context, Widget? child) {
         final pet = petProvider.pet;
         final currentMember = memberProvider.currentMember;
-        final selectedMood = petProvider.moodForMember(currentMember.name);
+        final selectedMood = petProvider.moodForMember(currentMember.id);
 
         return Scaffold(
           appBar: AppBar(

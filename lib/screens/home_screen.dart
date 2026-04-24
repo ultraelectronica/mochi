@@ -32,9 +32,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final Pet pet = petProvider.pet;
     final Member currentMember = memberProvider.currentMember;
-    final MochiMood? selectedMood = petProvider.moodForMember(
-      currentMember.name,
-    );
+    final MochiMood? selectedMood = petProvider.moodForMember(currentMember.id);
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
@@ -392,7 +390,7 @@ class _MoodSummaryPanel extends StatelessWidget {
 
   final Member currentMember;
   final MochiMood? selectedMood;
-  final Map<String, MochiMood> familyCheckIns;
+  final Map<int, MochiMood> familyCheckIns;
   final List<Member> members;
   final MochiMood petMood;
   final VoidCallback onOpenSheet;
@@ -430,7 +428,7 @@ class _MoodSummaryPanel extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: members.map((Member member) {
-              final MochiMood? mood = familyCheckIns[member.name];
+              final MochiMood? mood = familyCheckIns[member.id];
               return Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,

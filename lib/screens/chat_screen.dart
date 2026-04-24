@@ -292,6 +292,9 @@ class _TypingBubble extends StatelessWidget {
       affection: 0,
       xp: 0,
       note: '',
+      username: '',
+      isAdmin: false,
+      invitePending: false,
     );
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -373,6 +376,9 @@ class _ExpandedChatHeader extends StatelessWidget {
                 affection: 0,
                 xp: 0,
                 note: '',
+                username: '',
+                isAdmin: false,
+                invitePending: false,
               ),
               size: 44,
               child: const Icon(
@@ -451,6 +457,9 @@ class _CollapsedChatHeader extends StatelessWidget {
                 affection: 0,
                 xp: 0,
                 note: '',
+                username: '',
+                isAdmin: false,
+                invitePending: false,
               ),
               size: 36,
               child: const Icon(
