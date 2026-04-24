@@ -2,24 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
+import '../models/auth_session.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
+import '../services/api_service.dart';
 import '../services/device_permission_service.dart';
 import '../services/floating_mochi_service.dart';
-import '../widgets/create_member_dialog.dart';
 import '../widgets/member_avatar.dart';
+import '../widgets/mochi_toast.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
+    required this.session,
     required this.petProvider,
     required this.memberProvider,
+    required this.onCreateMember,
+    required this.onLogout,
   });
 
+  final AuthSession session;
   final PetProvider petProvider;
   final MemberProvider memberProvider;
+  final Future<void> Function() onCreateMember;
+  final Future<void> Function() onLogout;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -42,10 +50,32 @@ class _SettingsScreenState extends State<SettingsScreen>
         error.toString().replaceFirst('Exception: ', '');
   }
 
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  void _showToast(
+    String message, {
+    String? title,
+    MochiToastTone tone = MochiToastTone.info,
+    IconData? icon,
+  }) {
+    MochiToast.show(title: title, message: message, tone: tone, icon: icon);
+  }
+
+  void _showErrorToast(Object error) {
+    if (error is ApiException && error.isOffline) {
+      _showToast(
+        'Start the Mochi server at ${AppConfig.serverUrl}, then try again.',
+        title: 'Mochi server offline',
+        tone: MochiToastTone.warning,
+        icon: Icons.cloud_off_rounded,
+      );
+      return;
+    }
+
+    _showToast(
+      _errorMessage(error),
+      title: 'Something went sideways',
+      tone: MochiToastTone.error,
+      icon: Icons.sync_problem_rounded,
+    );
   }
 
   String _formatMemberLastSeen(DateTime? value) {
@@ -143,16 +173,22 @@ class _SettingsScreenState extends State<SettingsScreen>
         return;
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(notice)));
+      _showToast(
+        notice,
+        title: 'Updated',
+        tone: MochiToastTone.success,
+        icon: Icons.check_circle_outline_rounded,
+      );
     } on PlatformException catch (error) {
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message ?? 'Permission request failed.')),
+      _showToast(
+        error.message ?? 'Permission request failed.',
+        title: 'Permission issue',
+        tone: MochiToastTone.error,
+        icon: Icons.lock_outline_rounded,
       );
     } finally {
       if (mounted) {
@@ -196,16 +232,22 @@ class _SettingsScreenState extends State<SettingsScreen>
             'Floating Mochi is enabled and will appear when the app moves to the background.';
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      _showToast(
+        message,
+        title: 'Floating Mochi',
+        tone: value ? MochiToastTone.info : MochiToastTone.success,
+        icon: value ? Icons.open_in_new_rounded : Icons.close_rounded,
+      );
     } on PlatformException catch (error) {
       if (!mounted) {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message ?? 'Floating Mochi failed.')),
+      _showToast(
+        error.message ?? 'Floating Mochi failed.',
+        title: 'Floating Mochi',
+        tone: MochiToastTone.error,
+        icon: Icons.open_in_new_off_rounded,
       );
     } finally {
       if (mounted) {
@@ -217,33 +259,13 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 
   Future<void> _handleCreateMember() async {
-    final MemberDraft? draft = await showDialog<MemberDraft>(
-      context: context,
-      builder: (BuildContext context) => const CreateMemberDialog(),
-    );
-
-    if (draft == null || !mounted) {
-      return;
-    }
-
     try {
-      final Member member = await widget.memberProvider.createMember(
-        name: draft.name,
-        color: draft.color,
-      );
-      await widget.petProvider.refreshState(
-        includeHealth: false,
-        includeChat: false,
-      );
-      if (!mounted) {
-        return;
-      }
-      _showSnackBar('${member.name} joined Mochi\'s family room.');
+      await widget.onCreateMember();
     } catch (error) {
       if (!mounted) {
         return;
       }
-      _showSnackBar(_errorMessage(error));
+      _showErrorToast(error);
     }
   }
 
@@ -283,12 +305,17 @@ class _SettingsScreenState extends State<SettingsScreen>
       if (!mounted) {
         return;
       }
-      _showSnackBar('${member.name} was removed from the family list.');
+      _showToast(
+        '${member.name} was removed from the family list.',
+        title: 'Account removed',
+        tone: MochiToastTone.success,
+        icon: Icons.person_remove_alt_1_rounded,
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
-      _showSnackBar(_errorMessage(error));
+      _showErrorToast(error);
     }
   }
 
@@ -457,37 +484,54 @@ class _SettingsScreenState extends State<SettingsScreen>
                   icon: Icons.person_rounded,
                 ),
                 const SizedBox(height: 10),
+                _SettingsInfoRow(
+                  title: 'Household code',
+                  subtitle: widget.session.household.code,
+                  icon: Icons.home_work_rounded,
+                ),
+                const SizedBox(height: 10),
+                _SettingsInfoRow(
+                  title: 'Signed in as',
+                  subtitle:
+                      '${widget.session.account.username}${widget.session.account.isAdmin ? ' • admin' : ''}',
+                  icon: Icons.badge_rounded,
+                ),
+                const SizedBox(height: 10),
                 Text(
-                  'Family members',
+                  'Household accounts',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Select who is using this device, add new profiles, or remove old ones from the shared room.',
+                  widget.memberProvider.isAdmin
+                      ? 'Admin can create and remove household accounts here. Tap a row to inspect it in detail.'
+                      : 'Only the household admin can create or remove accounts. You can still inspect the roster.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
-                    onPressed: widget.memberProvider.isCreating
-                        ? null
-                        : _handleCreateMember,
-                    icon: widget.memberProvider.isCreating
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.person_add_alt_1_rounded),
-                    label: Text(
-                      widget.memberProvider.isCreating
-                          ? 'Adding member...'
-                          : 'Add member',
+                if (widget.memberProvider.isAdmin) ...<Widget>[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
+                      onPressed: widget.memberProvider.isCreating
+                          ? null
+                          : _handleCreateMember,
+                      icon: widget.memberProvider.isCreating
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.person_add_alt_1_rounded),
+                      label: Text(
+                        widget.memberProvider.isCreating
+                            ? 'Creating account...'
+                            : 'Create account',
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                ],
                 if (widget.memberProvider.isLoading)
                   const _SettingsLoadingRow(title: 'Loading family members')
                 else ...<Widget>[
@@ -507,6 +551,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                         selected: widget.memberProvider.selectedIndex == index,
                         busy:
                             widget.memberProvider.deletingMemberId == member.id,
+                        canDelete: widget.memberProvider.isAdmin,
                         onSelect: () =>
                             widget.memberProvider.selectMember(index),
                         onDelete: () => _handleDeleteMember(member),
@@ -541,6 +586,15 @@ class _SettingsScreenState extends State<SettingsScreen>
                   subtitle:
                       'Mood check-in, feed, and profile features were intentionally merged into Home.',
                   icon: Icons.info_outline_rounded,
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onLogout,
+                    icon: const Icon(Icons.logout_rounded),
+                    label: const Text('Log out'),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -943,6 +997,7 @@ class _MemberManagementRow extends StatelessWidget {
     required this.member,
     required this.selected,
     required this.busy,
+    required this.canDelete,
     required this.onSelect,
     required this.onDelete,
   });
@@ -950,6 +1005,7 @@ class _MemberManagementRow extends StatelessWidget {
   final Member member;
   final bool selected;
   final bool busy;
+  final bool canDelete;
   final VoidCallback onSelect;
   final VoidCallback onDelete;
 
@@ -981,7 +1037,13 @@ class _MemberManagementRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${member.affection} affection • ${member.xp} XP',
+                      [
+                        if (member.username.isNotEmpty) '@${member.username}',
+                        if (member.isAdmin) 'admin',
+                        if (member.invitePending) 'invite pending',
+                        '${member.affection} affection',
+                        '${member.xp} XP',
+                      ].join(' • '),
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                   ],
@@ -1000,11 +1062,13 @@ class _MemberManagementRow extends StatelessWidget {
                     border: Border.all(color: MochiPalette.ink, width: 2),
                   ),
                   child: Text(
-                    'Current',
+                    'Viewing',
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                 ),
-              busy
+              !canDelete
+                  ? const SizedBox.shrink()
+                  : busy
                   ? const SizedBox(
                       width: 22,
                       height: 22,
