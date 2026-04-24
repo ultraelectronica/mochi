@@ -1,13 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'config/app_config.dart';
+import 'models/auth_session.dart';
 import 'models/member.dart';
 import 'models/mood.dart';
 import 'providers/member_provider.dart';
 import 'providers/pet_provider.dart';
+import 'screens/auth_screen.dart';
 import 'services/floating_mochi_service.dart';
+import 'services/api_service.dart';
+import 'services/session_store.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/mood_checkin_screen.dart';
@@ -15,6 +20,7 @@ import 'screens/settings_screen.dart';
 import 'widgets/mood_checkin_sheet.dart';
 import 'widgets/create_member_dialog.dart';
 import 'widgets/mochi_bottom_nav_bar.dart';
+import 'widgets/mochi_toast.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +36,12 @@ class MochiApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: AppConfig.appTitle,
       theme: buildMochiTheme(),
+      builder: (BuildContext context, Widget? child) {
+        return MochiToastHost(
+          key: mochiToastHostKey,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: const MochiShell(),
     );
   }
@@ -43,14 +55,18 @@ class MochiShell extends StatefulWidget {
 }
 
 class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
+  final ApiService _apiService = ApiService();
   late final PetProvider _petProvider;
   late final MemberProvider _memberProvider;
   final FloatingMochiService _floatingMochiService =
       const FloatingMochiService();
 
   int _selectedTabIndex = 1;
+  bool _checkingAuth = true;
+  bool _authBusy = false;
   bool _bootstrapping = true;
   String? _bootstrapError;
+  AuthSession? _session;
   bool _didAutoShowMoodSheetThisSession = false;
 
   @override
@@ -60,7 +76,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     _petProvider = PetProvider();
     _memberProvider = MemberProvider();
     _floatingMochiService.syncAppForegroundState(true);
-    unawaited(_bootstrap());
+    unawaited(_restoreSession());
   }
 
   @override
@@ -89,6 +105,49 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _restoreSession() async {
+    await SessionStore.instance.load();
+
+    if (!SessionStore.instance.hasSession) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _checkingAuth = false;
+        _bootstrapping = false;
+      });
+      return;
+    }
+
+    try {
+      final AuthSession session = await _apiService.fetchSession();
+      _applySession(session);
+      await _bootstrap();
+    } catch (error) {
+      await SessionStore.instance.clearSessionToken();
+      await _petProvider.clearSession();
+      _memberProvider.clearSession();
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _session = null;
+        _bootstrapError = null;
+        _checkingAuth = false;
+        _bootstrapping = false;
+      });
+
+      _showErrorToast(error, offlineOnly: true);
+    }
+  }
+
+  void _applySession(AuthSession session) {
+    _session = session;
+    _memberProvider.configureSession(session);
+  }
+
   Future<void> _bootstrap() async {
     if (mounted) {
       setState(() {
@@ -109,6 +168,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
 
       setState(() {
         _bootstrapError = null;
+        _checkingAuth = false;
       });
     } catch (error) {
       if (!mounted) {
@@ -118,6 +178,8 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       setState(() {
         _bootstrapError = _primaryErrorMessage(error);
       });
+
+      _showErrorToast(error, offlineOnly: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -135,8 +197,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     if (!_petProvider.hasPet || !_memberProvider.hasMembers) {
       return;
     }
-    if (_petProvider.moodForMember(_memberProvider.currentMember.name) !=
-        null) {
+    if (_petProvider.moodForMember(_memberProvider.currentMember.id) != null) {
       return;
     }
     _didAutoShowMoodSheetThisSession = true;
@@ -195,19 +256,152 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       setState(() {
         _bootstrapError = _primaryErrorMessage(error);
       });
+
+      _showErrorToast(error, offlineOnly: true);
     }
   }
 
   String _primaryErrorMessage(Object error) {
+    if (error is ApiException) {
+      return error.message;
+    }
     return _petProvider.errorMessage ??
         _memberProvider.errorMessage ??
         error.toString().replaceFirst('Exception: ', '');
   }
 
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  void _showToast(
+    String message, {
+    String? title,
+    MochiToastTone tone = MochiToastTone.info,
+    IconData? icon,
+  }) {
+    MochiToast.show(title: title, message: message, tone: tone, icon: icon);
+  }
+
+  void _showErrorToast(Object error, {bool offlineOnly = false}) {
+    if (error is ApiException && error.isOffline) {
+      _showToast(
+        'Start the Mochi server at ${AppConfig.serverUrl}, then try again.',
+        title: 'Mochi server offline',
+        tone: MochiToastTone.warning,
+        icon: Icons.cloud_off_rounded,
+      );
+      return;
+    }
+
+    if (offlineOnly) {
+      return;
+    }
+
+    _showToast(
+      _primaryErrorMessage(error),
+      title: 'Something went sideways',
+      tone: MochiToastTone.error,
+      icon: Icons.sync_problem_rounded,
+    );
+  }
+
+  Future<void> _handleAuthenticatedSession(AuthSession session) async {
+    await SessionStore.instance.setSessionToken(session.sessionToken);
+    _applySession(session);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _selectedTabIndex = 1;
+      _checkingAuth = false;
+      _bootstrapError = null;
+    });
+
+    await _bootstrap();
+  }
+
+  Future<void> _runAuthAction(Future<AuthSession> Function() action) async {
+    if (_authBusy) {
+      return;
+    }
+
+    setState(() {
+      _authBusy = true;
+      _bootstrapError = null;
+    });
+
+    try {
+      final AuthSession session = await action();
+      await _handleAuthenticatedSession(session);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _bootstrapError = null;
+      });
+
+      _showErrorToast(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _authBusy = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleBootstrap(BootstrapDraft draft) async {
+    await _runAuthAction(
+      () => _apiService.bootstrap(
+        householdName: draft.householdName,
+        adminName: draft.adminName,
+        username: draft.username,
+        password: draft.password,
+        color: draft.color,
+      ),
+    );
+  }
+
+  Future<void> _handleLogin(LoginDraft draft) async {
+    await _runAuthAction(
+      () => _apiService.login(
+        householdCode: draft.householdCode,
+        username: draft.username,
+        password: draft.password,
+      ),
+    );
+  }
+
+  Future<void> _handleInvite(InviteDraft draft) async {
+    await _runAuthAction(
+      () => _apiService.acceptInvite(
+        inviteCode: draft.inviteCode,
+        password: draft.password,
+      ),
+    );
+  }
+
+  Future<void> _handleLogout() async {
+    try {
+      await _apiService.logout();
+    } catch (_) {}
+
+    await SessionStore.instance.clearSessionToken();
+    await _petProvider.clearSession();
+    _memberProvider.clearSession();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _session = null;
+      _bootstrapError = null;
+      _selectedTabIndex = 1;
+      _didAutoShowMoodSheetThisSession = false;
+      _checkingAuth = false;
+      _bootstrapping = false;
+    });
   }
 
   Future<void> _handleSendMessage(String text) async {
@@ -221,7 +415,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       );
     } catch (error) {
       if (mounted) {
-        _showSnackBar(_primaryErrorMessage(error));
+        _showErrorToast(error);
       }
     }
   }
@@ -236,7 +430,12 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       );
       if (!applied) {
         if (mounted) {
-          _showSnackBar('${member.name} already checked in today.');
+          _showToast(
+            '${member.name} already checked in today.',
+            title: 'Mood already logged',
+            tone: MochiToastTone.info,
+            icon: Icons.event_available_rounded,
+          );
         }
         return false;
       }
@@ -248,7 +447,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       return true;
     } catch (error) {
       if (mounted) {
-        _showSnackBar(_primaryErrorMessage(error));
+        _showErrorToast(error);
       }
       return false;
     }
@@ -265,7 +464,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       );
     } catch (error) {
       if (mounted) {
-        _showSnackBar(_primaryErrorMessage(error));
+        _showErrorToast(error);
       }
     }
   }
@@ -275,12 +474,22 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
       await _refreshRemoteState();
     } catch (error) {
       if (mounted) {
-        _showSnackBar(_primaryErrorMessage(error));
+        _showErrorToast(error);
       }
     }
   }
 
   Future<void> _openCreateMemberDialog() async {
+    if (!_memberProvider.isAdmin) {
+      _showToast(
+        'Only the household admin can create accounts.',
+        title: 'Admin only',
+        tone: MochiToastTone.warning,
+        icon: Icons.admin_panel_settings_rounded,
+      );
+      return;
+    }
+
     final MemberDraft? draft = await showDialog<MemberDraft>(
       context: context,
       builder: (BuildContext context) => const CreateMemberDialog(),
@@ -291,8 +500,9 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     }
 
     try {
-      final Member member = await _memberProvider.createMember(
+      final CreatedMemberInvite created = await _memberProvider.createMember(
         name: draft.name,
+        username: draft.username,
         color: draft.color,
       );
       if (_petProvider.hasPet) {
@@ -302,13 +512,62 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         );
       }
       if (mounted) {
-        _showSnackBar('${member.name} joined Mochi\'s family room.');
+        await _showInviteCodeDialog(created);
       }
     } catch (error) {
       if (mounted) {
-        _showSnackBar(_primaryErrorMessage(error));
+        _showErrorToast(error);
       }
     }
+  }
+
+  Future<void> _showInviteCodeDialog(CreatedMemberInvite created) async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('${created.member.name} account created'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('Username: ${created.member.username}'),
+              const SizedBox(height: 8),
+              Text('Invite code: ${created.inviteCode}'),
+              const SizedBox(height: 8),
+              Text('Household code: ${_session?.household.code ?? ''}'),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(
+                  ClipboardData(
+                    text:
+                        'Invite code: ${created.inviteCode}\nHousehold code: ${_session?.household.code ?? ''}\nUsername: ${created.member.username}',
+                  ),
+                );
+                if (!context.mounted) {
+                  return;
+                }
+                Navigator.of(context).pop();
+                _showToast(
+                  'Invite details copied.',
+                  title: 'Copied',
+                  tone: MochiToastTone.success,
+                  icon: Icons.content_copy_rounded,
+                );
+              },
+              child: const Text('Copy'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _openFullscreenChat() {
@@ -331,6 +590,41 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[_petProvider, _memberProvider]),
       builder: (BuildContext context, Widget? child) {
+        if (_checkingAuth) {
+          return Scaffold(
+            body: Stack(
+              children: <Widget>[
+                const Positioned.fill(child: _PixelBackdrop()),
+                SafeArea(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 520),
+                      child: const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: _StartupCard(
+                          title: 'Checking session',
+                          subtitle:
+                              'Looking for your saved household account before Mochi syncs the rest of the app.',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (_session == null) {
+          return AuthScreen(
+            isBusy: _authBusy,
+            errorMessage: null,
+            onBootstrap: _handleBootstrap,
+            onLogin: _handleLogin,
+            onAcceptInvite: _handleInvite,
+          );
+        }
+
         if (_bootstrapping) {
           return Scaffold(
             body: Stack(
@@ -436,8 +730,11 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
             onOpenChat: () => setState(() => _selectedTabIndex = 0),
           ),
           SettingsScreen(
+            session: _session!,
             petProvider: _petProvider,
             memberProvider: _memberProvider,
+            onCreateMember: _openCreateMemberDialog,
+            onLogout: _handleLogout,
           ),
         ];
 
@@ -456,9 +753,9 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
                           child: _HeaderCard(
+                            session: _session!,
                             memberProvider: _memberProvider,
                             petProvider: _petProvider,
-                            onMemberSelected: _memberProvider.selectMember,
                             onCreateMember: _openCreateMemberDialog,
                           ),
                         ),
@@ -625,15 +922,15 @@ class _FullscreenChatScreen extends StatelessWidget {
 
 class _HeaderCard extends StatefulWidget {
   const _HeaderCard({
+    required this.session,
     required this.memberProvider,
     required this.petProvider,
-    required this.onMemberSelected,
     required this.onCreateMember,
   });
 
+  final AuthSession session;
   final MemberProvider memberProvider;
   final PetProvider petProvider;
-  final ValueChanged<int> onMemberSelected;
   final VoidCallback onCreateMember;
 
   @override
@@ -696,12 +993,13 @@ class _HeaderCardState extends State<_HeaderCard> {
               ? _CollapsedHeader(
                   currentMember: currentMember,
                   memberCount: widget.memberProvider.members.length,
+                  householdCode: widget.session.household.code,
                   onExpand: () => _setCollapsed(false),
                 )
               : _ExpandedHeader(
+                  session: widget.session,
                   memberProvider: widget.memberProvider,
                   petProvider: widget.petProvider,
-                  onMemberSelected: widget.onMemberSelected,
                   onCreateMember: widget.onCreateMember,
                   onCollapse: () => _setCollapsed(true),
                 ),
@@ -713,16 +1011,16 @@ class _HeaderCardState extends State<_HeaderCard> {
 
 class _ExpandedHeader extends StatelessWidget {
   const _ExpandedHeader({
+    required this.session,
     required this.memberProvider,
     required this.petProvider,
-    required this.onMemberSelected,
     required this.onCreateMember,
     required this.onCollapse,
   });
 
+  final AuthSession session;
   final MemberProvider memberProvider;
   final PetProvider petProvider;
-  final ValueChanged<int> onMemberSelected;
   final VoidCallback onCreateMember;
   final VoidCallback onCollapse;
 
@@ -752,7 +1050,7 @@ class _ExpandedHeader extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   Text(
-                    'Shared AI companion pet with warm, colorful family rituals.',
+                    '${session.household.name} • code ${session.household.code}',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ],
@@ -768,23 +1066,24 @@ class _ExpandedHeader extends StatelessWidget {
                   : Icons.cloud_off_rounded,
             ),
             const SizedBox(width: 8),
-            InkWell(
-              onTap: onCreateMember,
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: MochiPalette.ink, width: 2.5),
-                ),
-                child: const Icon(
-                  Icons.person_add_alt_1_rounded,
-                  color: MochiPalette.ink,
+            if (memberProvider.isAdmin)
+              InkWell(
+                onTap: onCreateMember,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: MochiPalette.ink, width: 2.5),
+                  ),
+                  child: const Icon(
+                    Icons.person_add_alt_1_rounded,
+                    color: MochiPalette.ink,
+                  ),
                 ),
               ),
-            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -797,57 +1096,69 @@ class _ExpandedHeader extends StatelessWidget {
               int index,
             ) {
               final Member member = memberProvider.members[index];
-              final bool selected = memberProvider.selectedIndex == index;
-              final MochiMood? mood = petProvider.moodForMember(member.name);
-              return InkWell(
-                onTap: () => onMemberSelected(index),
-                borderRadius: BorderRadius.circular(20),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? member.color.withValues(alpha: 0.28)
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: MochiPalette.ink, width: 2.5),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Container(
-                        width: 34,
-                        height: 34,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: member.color,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: MochiPalette.ink, width: 2),
-                        ),
-                        child: Text(
-                          member.initials,
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
+              final bool selected =
+                  member.id == memberProvider.currentMember.id;
+              final MochiMood? mood = petProvider.moodForMember(member.id);
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? member.color.withValues(alpha: 0.28)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: MochiPalette.ink, width: 2.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: member.color,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: MochiPalette.ink, width: 2),
                       ),
-                      const SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            member.name,
-                            style: Theme.of(context).textTheme.labelLarge,
-                          ),
-                          Text(
-                            mood?.label ?? 'Ready',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
+                      child: Text(
+                        member.initials,
+                        style: Theme.of(context).textTheme.labelLarge,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              member.name,
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            if (member.isAdmin) ...<Widget>[
+                              const SizedBox(width: 6),
+                              const Icon(
+                                Icons.admin_panel_settings_rounded,
+                                size: 16,
+                              ),
+                            ],
+                          ],
+                        ),
+                        Text(
+                          mood?.label ??
+                              (member.invitePending
+                                  ? 'Invite pending'
+                                  : 'Ready'),
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               );
             }),
@@ -855,7 +1166,7 @@ class _ExpandedHeader extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _DragHandle(
-          label: 'Drag up to hide members',
+          label: 'Drag up to hide household roster',
           icon: Icons.keyboard_arrow_up_rounded,
           onTap: onCollapse,
         ),
@@ -868,11 +1179,13 @@ class _CollapsedHeader extends StatelessWidget {
   const _CollapsedHeader({
     required this.currentMember,
     required this.memberCount,
+    required this.householdCode,
     required this.onExpand,
   });
 
   final Member currentMember;
   final int memberCount;
+  final String householdCode;
   final VoidCallback onExpand;
 
   @override
@@ -899,7 +1212,7 @@ class _CollapsedHeader extends StatelessWidget {
                 children: <Widget>[
                   Text('Mochi', style: Theme.of(context).textTheme.titleMedium),
                   Text(
-                    '$memberCount members ready • ${currentMember.name} selected',
+                    '$memberCount accounts • ${currentMember.name} • $householdCode',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ],
@@ -909,7 +1222,7 @@ class _CollapsedHeader extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _DragHandle(
-          label: 'Drag down to show members',
+          label: 'Drag down to show household roster',
           icon: Icons.keyboard_arrow_down_rounded,
           onTap: onExpand,
         ),
