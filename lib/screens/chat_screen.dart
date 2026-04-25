@@ -8,6 +8,7 @@ import '../models/mood.dart';
 import '../models/pet.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
+import '../services/stt_service.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/member_avatar.dart';
 
@@ -24,7 +25,7 @@ class ChatScreen extends StatefulWidget {
 
   final PetProvider petProvider;
   final MemberProvider memberProvider;
-  final Future<void> Function(String text) onSendMessage;
+  final Future<void> Function(String text, {String inputType}) onSendMessage;
   final Future<void> Function() onRefreshHistory;
   final VoidCallback? onToggleFullscreen;
   final bool isFullscreen;
@@ -36,6 +37,8 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   late final TextEditingController _controller;
   late final ScrollController _scrollController;
+  final SttService _stt = SttService();
+  bool _isListening = false;
   bool _headerCollapsed = false;
   double _headerDragDelta = 0;
   int _lastRenderedEntryCount = 0;
@@ -45,6 +48,7 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _controller = TextEditingController();
     _scrollController = ScrollController();
+    _stt.initialize();
   }
 
   @override
@@ -56,6 +60,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _stt.cancel();
     super.dispose();
   }
 
@@ -104,13 +109,46 @@ class _ChatScreenState extends State<ChatScreen> {
     _headerDragDelta = 0;
   }
 
-  Future<void> _send() async {
+  Future<void> _send({String inputType = 'text'}) async {
     final String text = _controller.text.trim();
     if (text.isEmpty || widget.petProvider.replyPending) {
       return;
     }
     _controller.clear();
-    await widget.onSendMessage(text);
+    await widget.onSendMessage(text, inputType: inputType);
+  }
+
+  Future<void> _toggleMic() async {
+    if (_isListening) {
+      final String result = await _stt.stopListening();
+      setState(() {
+        _isListening = false;
+      });
+      final String text = result.trim();
+      if (text.isNotEmpty && !widget.petProvider.replyPending) {
+        _controller.text = text;
+        await _send(inputType: 'voice');
+      }
+      return;
+    }
+
+    final bool available = await _stt.initialize();
+    if (!available) {
+      return;
+    }
+
+    await _stt.startListening(
+      onResult: (String result) {
+        if (result.trim().isNotEmpty) {
+          setState(() {
+            _controller.text = result;
+          });
+        }
+      },
+    );
+    setState(() {
+      _isListening = true;
+    });
   }
 
   Future<void> _refreshHistory() async {
@@ -258,12 +296,23 @@ class _ChatScreenState extends State<ChatScreen> {
                   controller: _controller,
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _send(),
-                  decoration: const InputDecoration(
-                    hintText: 'Tell Mochi about a tiny family moment...',
+                  decoration: InputDecoration(
+                    hintText: _isListening
+                        ? 'Listening...'
+                        : 'Tell Mochi about a tiny family moment...',
                   ),
                 ),
               ),
               const SizedBox(width: 10),
+              IconButton(
+                onPressed: _stt.isAvailable ? _toggleMic : null,
+                icon: Icon(
+                  _isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                ),
+                color: _isListening ? MochiPalette.lightPink : null,
+                tooltip: 'Voice input',
+              ),
+              const SizedBox(width: 6),
               FilledButton.icon(
                 onPressed: widget.petProvider.replyPending ? null : _send,
                 icon: const Icon(Icons.send_rounded),

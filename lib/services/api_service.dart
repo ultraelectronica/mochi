@@ -124,6 +124,39 @@ class ApiService {
         .toList(growable: false);
   }
 
+  Future<MemorySnippet> createMemory({
+    required String content,
+    int weight = 1,
+  }) async {
+    return MemorySnippet.fromJson(
+      await _sendMap('POST', '/pet/memories', <String, dynamic>{
+        'content': content,
+        'weight': weight,
+      }),
+    );
+  }
+
+  Future<MemorySnippet> updateMemory({
+    required int id,
+    String? content,
+    int? weight,
+  }) async {
+    final Map<String, dynamic> body = <String, dynamic>{};
+    if (content != null) {
+      body['content'] = content;
+    }
+    if (weight != null) {
+      body['weight'] = weight;
+    }
+    return MemorySnippet.fromJson(
+      await _sendMap('PATCH', '/pet/memories/$id', body),
+    );
+  }
+
+  Future<void> deleteMemory(int id) async {
+    await _request('DELETE', '/pet/memories/$id');
+  }
+
   Future<List<Member>> fetchMembers() async {
     final List<dynamic> json = await _getList('/members');
     return json
@@ -177,11 +210,16 @@ class ApiService {
   Future<({String reply, Pet pet})> sendMessage({
     required int memberId,
     required String text,
+    String inputType = 'text',
   }) async {
+    final Map<String, dynamic> body = <String, dynamic>{'text': text};
+    if (inputType == 'voice') {
+      body['input_type'] = 'voice';
+    }
     final Map<String, dynamic> json = await _sendMap(
       'POST',
       '/chat',
-      <String, dynamic>{'text': text},
+      body,
     );
 
     return (

@@ -75,7 +75,7 @@ class _AuthScreenState extends State<AuthScreen>
           'The first account becomes the admin and handles everyone else\'s accounts.',
       accent: MochiPalette.lightPink,
       icon: Icons.home_work_rounded,
-      formHeight: 546,
+      formHeight: 620,
     ),
     _AuthTabSpec(
       label: 'Use invite',
@@ -104,6 +104,7 @@ class _AuthScreenState extends State<AuthScreen>
     final bool keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: <Widget>[
           const Positioned.fill(child: _PixelBackdrop()),
@@ -198,123 +199,240 @@ class _AuthTabSpec {
   final double formHeight;
 }
 
-class _AuthHero extends StatelessWidget {
+class _AuthHero extends StatefulWidget {
   const _AuthHero({this.compact = false});
 
   final bool compact;
 
   @override
+  State<_AuthHero> createState() => _AuthHeroState();
+}
+
+class _AuthHeroState extends State<_AuthHero> {
+  bool _collapsed = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.all(compact ? 20 : 28),
-      decoration: pixelCardDecoration(MochiPalette.lightPink),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Row(
+    final bool collapsed = widget.compact && _collapsed;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      child: Container(
+        padding: EdgeInsets.all(widget.compact ? (collapsed ? 14 : 20) : 28),
+        decoration: pixelCardDecoration(MochiPalette.lightPink),
+        child: collapsed ? _buildCollapsed(context) : _buildExpanded(context),
+      ),
+    );
+  }
+
+  Widget _buildCollapsed(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: MochiPalette.yellow,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: MochiPalette.ink, width: 2.5),
+              ),
+              child: const Icon(
+                Icons.pets_rounded,
+                color: MochiPalette.ink,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'One Mochi per home.',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: _AuthHeroHandle(
+            label: 'Tap to expand',
+            icon: Icons.keyboard_arrow_down_rounded,
+            onTap: () => setState(() => _collapsed = false),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExpanded(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Container(
+              width: widget.compact ? 62 : 76,
+              height: widget.compact ? 62 : 76,
+              decoration: BoxDecoration(
+                color: MochiPalette.yellow,
+                borderRadius:
+                    BorderRadius.circular(widget.compact ? 20 : 22),
+                border: Border.all(color: MochiPalette.ink, width: 3),
+              ),
+              child: Icon(
+                Icons.pets_rounded,
+                size: widget.compact ? 30 : 36,
+                color: MochiPalette.ink,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Row(
+                children: <Widget>[
+                  _HeroChip(label: 'Admin-only', icon: Icons.key_rounded),
+                  const SizedBox(width: 8),
+                  _HeroChip(
+                      label: 'One pet/home', icon: Icons.home_rounded),
+                ],
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: widget.compact ? 18 : 22),
+        Text(
+          'One Mochi per home.',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Sign into your household, create a fresh one, or finish an invite without mixing anyone else\'s feed, mood log, or roster.',
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+        const SizedBox(height: 18),
+        const Row(
+          children: <Widget>[
+            Expanded(
+              child: _HeroRoomCard(
+                title: 'Maple House',
+                subtitle: '3 accounts • happy Mochi',
+                accent: MochiPalette.cloudBlue,
+                icon: Icons.wb_sunny_outlined,
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: _HeroRoomCard(
+                title: 'Moon Nest',
+                subtitle: '2 accounts • sleepy Mochi',
+                accent: MochiPalette.mint,
+                icon: Icons.nights_stay_outlined,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: MochiPalette.ink, width: 2.5),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Container(
-                width: compact ? 62 : 76,
-                height: compact ? 62 : 76,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
-                  color: MochiPalette.yellow,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: MochiPalette.ink, width: 3),
+                  color: MochiPalette.lavender,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: MochiPalette.ink, width: 2),
                 ),
-                child: Icon(
-                  Icons.pets_rounded,
-                  size: compact ? 30 : 36,
-                  color: MochiPalette.ink,
-                ),
+                child:
+                    const Icon(Icons.dns_rounded, color: MochiPalette.ink),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    _HeroChip(label: 'Admin-only', icon: Icons.key_rounded),
-                    const SizedBox(width: 8),
-                    _HeroChip(label: 'One pet/home', icon: Icons.home_rounded),
+                    Text(
+                      'Current server target',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      AppConfig.serverUrl,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   ],
                 ),
               ),
             ],
           ),
-          SizedBox(height: compact ? 18 : 22),
-          Text(
-            'One Mochi per home.',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Sign into your household, create a fresh one, or finish an invite without mixing anyone else\'s feed, mood log, or roster.',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 18),
-          const Row(
-            children: <Widget>[
-              Expanded(
-                child: _HeroRoomCard(
-                  title: 'Maple House',
-                  subtitle: '3 accounts • happy Mochi',
-                  accent: MochiPalette.cloudBlue,
-                  icon: Icons.wb_sunny_outlined,
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: _HeroRoomCard(
-                  title: 'Moon Nest',
-                  subtitle: '2 accounts • sleepy Mochi',
-                  accent: MochiPalette.mint,
-                  icon: Icons.nights_stay_outlined,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(color: MochiPalette.ink, width: 2.5),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: MochiPalette.lavender,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: MochiPalette.ink, width: 2),
-                  ),
-                  child: const Icon(Icons.dns_rounded, color: MochiPalette.ink),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        'Current server target',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        AppConfig.serverUrl,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+        ),
+        if (widget.compact) ...<Widget>[
+          const SizedBox(height: 12),
+          Center(
+            child: _AuthHeroHandle(
+              label: 'Tap to minimize',
+              icon: Icons.keyboard_arrow_up_rounded,
+              onTap: () => setState(() => _collapsed = true),
             ),
           ),
         ],
+      ],
+    );
+  }
+}
+
+class _AuthHeroHandle extends StatelessWidget {
+  const _AuthHeroHandle({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 44,
+              height: 6,
+              decoration: BoxDecoration(
+                color: MochiPalette.ink.withValues(alpha: 0.24),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(icon, size: 16, color: MochiPalette.ink),
+                const SizedBox(width: 4),
+                Text(label, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
