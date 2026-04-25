@@ -1,20 +1,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
 import '../services/api_service.dart';
+import '../services/tts_service.dart';
 import '../services/websocket_service.dart';
 
 class PetProvider extends ChangeNotifier {
-  PetProvider({ApiService? apiService, WebSocketService? webSocketService})
+  PetProvider({ApiService? apiService, WebSocketService? webSocketService, TtsService? ttsService})
     : _apiService = apiService ?? ApiService(),
-      _webSocketService = webSocketService ?? WebSocketService();
+      _webSocketService = webSocketService ?? WebSocketService(),
+      _ttsService = ttsService ?? TtsService();
 
   final ApiService _apiService;
   final WebSocketService _webSocketService;
+  final TtsService _ttsService;
 
   StreamSubscription<Map<String, dynamic>>? _webSocketSubscription;
 
@@ -31,6 +35,8 @@ class PetProvider extends ChangeNotifier {
   bool _replyPending = false;
   bool _isLoading = true;
   String? _errorMessage;
+
+  static const String _ttsPrefKey = 'mochi_tts_enabled';
 
   Pet get pet => _pet!;
   List<ChatEntry> get chatEntries => List<ChatEntry>.unmodifiable(_chatEntries);
@@ -71,6 +77,12 @@ class PetProvider extends ChangeNotifier {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _ttsEnabled = prefs.getBool(_ttsPrefKey) ?? true;
+      notifyListeners();
+    } catch (_) {}
 
     try {
       await refreshState(includeHealth: true, includeChat: true);
@@ -140,6 +152,7 @@ class PetProvider extends ChangeNotifier {
   Future<void> sendMessage({
     required Member member,
     required String text,
+    String inputType = 'text',
   }) async {
     final ChatEntry optimistic = ChatEntry.local(
       author: member.name,
@@ -156,6 +169,7 @@ class PetProvider extends ChangeNotifier {
       final ({String reply, Pet pet}) result = await _apiService.sendMessage(
         memberId: member.id,
         text: text,
+        inputType: inputType,
       );
 
       _pet = result.pet;
@@ -165,6 +179,10 @@ class PetProvider extends ChangeNotifier {
       ];
       _serverOnline = true;
       _errorMessage = null;
+
+      if (_ttsEnabled && result.reply.isNotEmpty) {
+        unawaited(_ttsService.speak(result.reply));
+      }
 
       try {
         await refreshState(includeHealth: false, includeChat: true);
@@ -232,6 +250,26 @@ class PetProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> addMemory({required String content, int weight = 1}) async {
+    await _apiService.createMemory(content: content, weight: weight);
+    await refreshState(includeHealth: false, includeChat: false);
+  }
+
+  Future<void> updateMemory({
+    required int id,
+    String? content,
+    int? weight,
+  }) async {
+    await _apiService.updateMemory(id: id, content: content, weight: weight);
+    await refreshState(includeHealth: false, includeChat: false);
+  }
+
+  Future<void> removeMemory(int id) async {
+    await _apiService.deleteMemory(id);
+    _memories = List<MemorySnippet>.from(_memories)..removeWhere((m) => m.id == id);
+    notifyListeners();
+  }
+
   Future<void> clearSession() async {
     await _webSocketSubscription?.cancel();
     await _webSocketService.disconnect();
@@ -252,7 +290,13 @@ class PetProvider extends ChangeNotifier {
       return;
     }
     _ttsEnabled = value;
+    if (!value) {
+      unawaited(_ttsService.stop());
+    }
     notifyListeners();
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool(_ttsPrefKey, value);
+    });
   }
 
   void setNotificationsEnabled(bool value) {
@@ -301,6 +345,7 @@ class PetProvider extends ChangeNotifier {
   void dispose() {
     unawaited(_webSocketSubscription?.cancel());
     unawaited(_webSocketService.dispose());
+    unawaited(_ttsService.dispose());
     super.dispose();
   }
 }

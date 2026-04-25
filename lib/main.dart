@@ -404,11 +404,11 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _handleSendMessage(String text) async {
+  Future<void> _handleSendMessage(String text, {String inputType = 'text'}) async {
     final Member member = _memberProvider.currentMember;
 
     try {
-      await _petProvider.sendMessage(member: member, text: text);
+      await _petProvider.sendMessage(member: member, text: text, inputType: inputType);
       await _memberProvider.loadMembers(
         setLoading: false,
         preferredMemberId: member.id,
@@ -882,7 +882,7 @@ class _FullscreenChatScreen extends StatelessWidget {
 
   final PetProvider petProvider;
   final MemberProvider memberProvider;
-  final Future<void> Function(String text) onSendMessage;
+  final Future<void> Function(String text, {String inputType}) onSendMessage;
   final Future<void> Function() onRefreshHistory;
 
   @override

@@ -273,6 +273,7 @@ class ActivityEntry {
 
 class MemorySnippet {
   const MemorySnippet({
+    required this.id,
     required this.title,
     required this.body,
     required this.timestamp,
@@ -286,6 +287,7 @@ class MemorySnippet {
     final String memberName = (json['member_name'] as String? ?? 'Family')
         .trim();
     return MemorySnippet(
+      id: _asInt(json['id']),
       title: '$memberName memory',
       body: (json['content'] as String? ?? '').trim(),
       timestamp: 'Saved ${_formatRelative(createdAt).toLowerCase()}',
@@ -297,6 +299,7 @@ class MemorySnippet {
     );
   }
 
+  final int id;
   final String title;
   final String body;
   final String timestamp;
