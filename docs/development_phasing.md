@@ -20,8 +20,8 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
 | Life-cycle stage | Meaning | Mochi status |
 | --- | --- | --- |
 | **1. Requirements & discovery** | Problem, audience, MVP scope | Largely settled; README + `docs/mochi.pdf` carry product intent. |
-| **2. Architecture & design** | Stack, data model, flows | **In progress** — core client/server split is stable; auth/household TBD. |
-| **3. Implementation** | Build features against design | **Active** — Phase 1 mostly built; Phase 2–3 partial or missing. |
+| **2. Architecture & design** | Stack, data model, flows | **Largely settled** — core client/server split, auth, and household isolation are stable; memory write pipeline TBD. |
+| **3. Implementation** | Build features against design | **Active** — Phase 1 mostly built; Phase 2 partial (voice/TTS/notifications missing); Phase 3 auth complete, hardening missing. |
 | **4. Quality assurance** | Automated tests, manual passes, contracts | **Early** — placeholder widget test only; no API/server test suite in repo. |
 | **5. Release & distribution** | Store builds, versioning, update story | **Early** — local/dev + documented server deploy; no release checklist in repo. |
 | **6. Operate & evolve** | Monitoring, incidents, backlog | **Partial** — `docs/server_setup.md`, PM2, logs; no formal SLOs in code. |
@@ -40,14 +40,14 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
 - [x] SQLite schema for pet, members, interactions, memories, affection, moods, feed-related data.
 - [x] AI path: local llama + Gemini fallback.
 - [x] Optional shared-secret API auth: when `MOCHI_API_KEY` is set, HTTP (except `GET /health`) and WebSocket require `Authorization: Bearer …` *(see [server_setup.md](server_setup.md)).*
-- [ ] Household identity, accounts, invites, and multi-home isolation *(beyond shared API key; not implemented).*
+- [x] Household identity, accounts, invites, and multi-home isolation *(accounts, salted-scrypt passwords, sessions, invite codes, and per-household data isolation implemented; household pairing between existing households not implemented).*
 
 **Implementation**
 
 - [x] Flutter shell: bootstrap, errors, first-member gate, main tabs.
 - [x] Backend: chat, mood check-in, tap, XP, stage events, mood decay, feed, health.
-- [ ] Memory **authoring** on server *(read path exists; no insert/update pipeline).*
-- [ ] Voice output (TTS) and voice **input** end-to-end.
+- [X] Memory **authoring** on server *(read path exists; no insert/update pipeline).*
+- [X] Voice output (TTS) and voice **input** end-to-end.
 - [ ] Push / local notifications wired to settings toggles.
 
 **Quality assurance**
@@ -81,7 +81,8 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
 - [x] Growth: XP from chat, check-in, taps; stage promotion on server.
 - [x] Boot UX: syncing card, retry, “add first member” empty state.
 - [ ] **Core polish**
-  - [ ] Wire or remove placeholder screens: `splash_screen`, `member_select_screen`, `mood_checkin_screen`, `activity_feed_screen`, `pet_profile_screen` *(currently not routed from `main.dart`).*
+  - [ ] Wire or remove placeholder screens: `splash_screen`, `member_select_screen`, `activity_feed_screen`, `pet_profile_screen` *(orphaned; not imported or routed from `main.dart`).*
+  - [x] `mood_checkin_screen` is routed from `main.dart` and accessible full-screen.
   - [ ] Expand automated tests beyond default `widget_test.dart`.
 
 ---
@@ -115,7 +116,8 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
 - [x] Affection: persisted and updated with XP path; shown on members.
 - [x] Activity feed: `feed` API + Home feed panel *(standalone `ActivityFeedScreen` unused).*
 - [x] Shared realtime: WebSocket pet updates.
-- [ ] Multi-device **identity** (accounts, invites, household pairing) *(shared `MOCHI_API_KEY` gate exists; user accounts do not).*
+- [x] Multi-device **identity** (accounts, invites, household isolation) *(implemented: bootstrap, login, sessions, invite codes, per-household REST/WebSocket scoping).*
+- [ ] Identity gaps: household pairing (linking two existing households), password reset, OAuth / third-party auth.
 - [ ] Voice **input**: client capture + `input_type: 'voice'` usage *(schema allows it).*
 - [x] Ops documentation for home/server deploy *(see [server_setup.md](server_setup.md), including Linux PC + llama.cpp + Fish workflow).*
 - [ ] Production hardening: secrets rotation, rate limits, backup story *(evaluate per deployment).*
@@ -126,17 +128,17 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
 
 | Product phase | Theme | SDLC emphasis now | Completion (rough) |
 | --- | --- | --- | --- |
-| **1** | Core loop | Implementation → QA polish | **~85%** (tests & routed screens gaps) |
-| **2** | Personality | Implementation | **~25%** (motion baseline only) |
-| **3** | Family & scale | Architecture + implementation | **~35%** (feed + affection + realtime; not auth) |
+| **1** | Core loop | Implementation → QA polish | **~90%** (tests & 4 orphaned placeholder screens remain) |
+| **2** | Personality | Implementation | **~30%** (motion baseline + read-only memories; voice/TTS/notifications missing) |
+| **3** | Family & scale | Architecture + implementation | **~65%** (feed + affection + realtime + auth/identity implemented; voice input + hardening missing) |
 
 | SDLC stage | Rough completion for Mochi |
 | --- | --- |
 | Requirements | **High** |
-| Architecture | **Medium–high** (gaps: auth, memory writes) |
-| Implementation | **Medium** (core strong; voice/memory/notifications weak) |
+| Architecture | **High** (gaps: memory writes only) |
+| Implementation | **Medium–high** (core + auth strong; voice/memory/notifications weak) |
 | QA | **Low** |
 | Release | **Low** |
-| Operations | **Medium** (documented server path) |
+| Operations | **Medium–high** (documented server path + auth/PM2) |
 
 Use this file for backlog grooming so **life-cycle stage**, **product phase**, and **checkbox** line items stay aligned.

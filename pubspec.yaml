@@ -34,8 +34,10 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_svg: ^2.0.10+1
+  flutter_tts: ^4.2.2
   http: ^1.2.2
   shared_preferences: ^2.5.3
+  speech_to_text: ^7.0.0
   web_socket_channel: ^3.0.1
 
 dev_dependencies:

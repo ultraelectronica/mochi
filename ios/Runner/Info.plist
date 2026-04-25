@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Mochi uses the microphone for voice notes and warm spoken replies.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Mochi uses speech recognition to understand your voice messages.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Mochi needs photo library access so your family can upload moments into chat and memories.</string>
 	<key>UIApplicationSceneManifest</key>
