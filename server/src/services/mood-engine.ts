@@ -13,15 +13,15 @@ const moodDelta: Record<string, number> = {
   scared: -22,
 }
 
-function clamp(value: number, min: number, max: number) {
+export function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
-function dominantCount(moods: string[], target: string) {
+export function dominantCount(moods: string[], target: string) {
   return moods.filter((mood) => mood === target).length
 }
 
-function pickMood(score: number, recentMoods: string[], recentChats: number, inactivityHours: number) {
+export function pickMood(score: number, recentMoods: string[], recentChats: number, inactivityHours: number) {
   if (inactivityHours >= config.moodDecayHours * 2) {
     return 'hungry'
   }
