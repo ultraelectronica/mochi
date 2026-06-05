@@ -70,11 +70,13 @@ export const config = {
   apiKey: process.env.MOCHI_API_KEY?.trim() || '',
   llamaUrl: process.env.LLAMA_URL?.trim() || 'http://127.0.0.1:8080',
   geminiKey: process.env.GEMINI_API_KEY?.trim() || '',
+  host: process.env.HOST?.trim() || '0.0.0.0',
   port: envNumber('PORT', 3000),
   xpPerChat: envNumber('XP_PER_CHAT', 10),
   xpPerCheckin: envNumber('XP_PER_CHECKIN', 5),
   xpPerTap: envNumber('XP_PER_TAP', 2),
   moodDecayHours: envNumber('MOOD_DECAY_HOURS', 12),
+  sessionMaxAgeDays: envNumber('SESSION_MAX_AGE_DAYS', 30),
   stages,
   moods,
 }
