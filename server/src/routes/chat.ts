@@ -7,6 +7,7 @@ import { getReply } from '../services/ai.ts'
 import { recalculateMood } from '../services/mood-engine.ts'
 import { getPet } from '../services/pets.ts'
 import { buildPrompt } from '../services/prompt.ts'
+import { upsertMemory } from '../services/memories.ts'
 import { awardXP, checkStagePromotion } from '../services/xp.ts'
 import { broadcastHousehold } from '../ws/index.ts'
 
@@ -66,6 +67,12 @@ router.post('/', async (request, response) => {
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(auth.householdId, memberId, text, reply, inputType, xpAwarded)
 
+    upsertMemory({
+      householdId: auth.householdId,
+      memberId: auth.memberId,
+      content: text,
+    })
+
     const promoted = checkStagePromotion(auth.householdId)
     recalculateMood(auth.householdId)
 
@@ -82,7 +89,10 @@ router.post('/', async (request, response) => {
 router.get('/', (request, response) => {
   const auth = getRequestAuth(request)
   const requestedLimit = Number(request.query.limit)
-  const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 30
+  const limit = Math.min(
+    Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 30,
+    200,
+  )
 
   const interactions = db
     .prepare(
