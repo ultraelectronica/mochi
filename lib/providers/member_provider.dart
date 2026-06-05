@@ -12,6 +12,9 @@ class MemberProvider extends ChangeNotifier {
 
   final ApiService _apiService;
 
+  DateTime _lastLoadedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _minLoadInterval = Duration(seconds: 5);
+
   final List<Member> _members = <Member>[];
   int _selectedIndex = 0;
   int? _currentMemberId;
@@ -79,7 +82,13 @@ class MemberProvider extends ChangeNotifier {
   Future<void> loadMembers({
     bool setLoading = true,
     int? preferredMemberId,
+    bool force = false,
   }) async {
+    if (!setLoading && !force &&
+        DateTime.now().difference(_lastLoadedAt) < _minLoadInterval) {
+      return;
+    }
+
     if (setLoading) {
       _isLoading = true;
       notifyListeners();
@@ -93,6 +102,7 @@ class MemberProvider extends ChangeNotifier {
       _syncSelection(preferredMemberId: preferredMemberId);
       await _refreshSelectedMemberDetail(setLoading: false);
       _errorMessage = null;
+      _lastLoadedAt = DateTime.now();
     } on ApiException catch (error) {
       _errorMessage = error.message;
       rethrow;

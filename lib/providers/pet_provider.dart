@@ -22,6 +22,11 @@ class PetProvider extends ChangeNotifier {
 
   StreamSubscription<Map<String, dynamic>>? _webSocketSubscription;
 
+  Future<void>? _activeRefresh;
+  DateTime _lastRefreshedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static const Duration _minRefreshInterval = Duration(seconds: 5);
+
   Pet? _pet;
   List<ChatEntry> _chatEntries = <ChatEntry>[];
   List<ActivityEntry> _feedEntries = <ActivityEntry>[];
@@ -108,6 +113,32 @@ class PetProvider extends ChangeNotifier {
   }
 
   Future<void> refreshState({
+    bool includeHealth = true,
+    bool includeChat = true,
+    bool force = false,
+  }) async {
+    if (_activeRefresh != null) {
+      return _activeRefresh!;
+    }
+
+    if (!force &&
+        DateTime.now().difference(_lastRefreshedAt) < _minRefreshInterval) {
+      return;
+    }
+
+    _activeRefresh = _doRefresh(
+      includeHealth: includeHealth,
+      includeChat: includeChat,
+    );
+    try {
+      await _activeRefresh!;
+    } finally {
+      _activeRefresh = null;
+      _lastRefreshedAt = DateTime.now();
+    }
+  }
+
+  Future<void> _doRefresh({
     bool includeHealth = true,
     bool includeChat = true,
   }) async {
