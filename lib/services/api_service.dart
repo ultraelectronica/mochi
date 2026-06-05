@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -339,6 +340,8 @@ class ApiService {
     Map<String, dynamic>? body,
   }) async {
     final Uri uri = AppConfig.apiUri(path, queryParameters);
+    debugPrint('[API] $method $uri');
+    if (body != null) debugPrint('[API] body: $body');
     late final http.Response response;
 
     try {
@@ -359,12 +362,15 @@ class ApiService {
       } else {
         response = await _client.get(uri, headers: _headers);
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[API] OFFLINE — $uri ($e)');
       throw const ApiException(
         'Unable to reach the Mochi server',
         kind: ApiErrorKind.offline,
       );
     }
+
+    debugPrint('[API] $method $path → ${response.statusCode}');
 
     final String rawBody = response.body.trim();
     dynamic json;
