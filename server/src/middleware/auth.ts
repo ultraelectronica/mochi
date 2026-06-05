@@ -36,10 +36,9 @@ export function requireApiKey(request: Request, response: Response, next: NextFu
     return
   }
 
-  const header = request.headers.authorization?.trim()
-  const expected = `Bearer ${config.apiKey}`
+  const token = request.headers.authorization?.split(' ').pop()
 
-  if (header !== expected) {
+  if (token !== config.apiKey) {
     response.status(401).json({ error: 'Unauthorized' })
     return
   }
