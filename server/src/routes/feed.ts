@@ -9,7 +9,10 @@ const router = express.Router()
 router.get('/', (request, response) => {
   const auth = getRequestAuth(request)
   const requestedLimit = Number(request.query.limit)
-  const limit = Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 30
+  const limit = Math.min(
+    Number.isInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 30,
+    200,
+  )
 
   const chatEvents = db
     .prepare(
