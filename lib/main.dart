@@ -233,8 +233,8 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
   Future<void> _refreshRemoteState({bool reconnectRealtime = false}) async {
     try {
       await Future.wait<void>(<Future<void>>[
-        _petProvider.refreshState(includeHealth: true, includeChat: true),
-        _memberProvider.loadMembers(setLoading: false),
+        _petProvider.refreshState(includeHealth: true, includeChat: true, force: true),
+        _memberProvider.loadMembers(setLoading: false, force: true),
       ]);
 
       if (reconnectRealtime) {
