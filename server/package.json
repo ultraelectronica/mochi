@@ -12,7 +12,8 @@
     "pm2:reload": "pm2 reload mochi-server",
     "pm2:logs": "pm2 logs mochi-server",
     "pm2:status": "pm2 status",
-    "pm2:save": "pm2 save"
+    "pm2:save": "pm2 save",
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
