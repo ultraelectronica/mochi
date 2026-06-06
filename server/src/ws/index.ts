@@ -24,9 +24,9 @@ export function initWS(server: Parameters<typeof WebSocketServer>[0]['server']) 
   const wsServer = new WebSocketServer({
     server,
     verifyClient: (info) => {
-      const auth = info.req.headers['authorization']?.trim()
+      const token = info.req.headers['authorization']?.split(' ').pop()
 
-      if (config.apiKey && auth !== `Bearer ${config.apiKey}`) {
+      if (config.apiKey && token !== config.apiKey) {
         return false
       }
 
