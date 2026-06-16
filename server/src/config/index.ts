@@ -1,4 +1,6 @@
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 export type StageDefinition = {
   stage: number
@@ -13,6 +15,20 @@ export type MoodDefinition = {
   note: string
   reaction: string
   xpModifier: number
+}
+
+/** Expand a leading `~` to the user's home directory (spawned processes don't). */
+function expandHome(value: string) {
+  if (!value) {
+    return ''
+  }
+  if (value === '~') {
+    return os.homedir()
+  }
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(os.homedir(), value.slice(2))
+  }
+  return value
 }
 
 function loadEnvFile() {
@@ -50,6 +66,14 @@ function loadTson<T>(file: URL): T {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as T
 }
 
+function envBool(name: string, fallback: boolean): boolean {
+  const raw = (process.env[name] ?? '').trim().toLowerCase()
+  if (raw === '') {
+    return fallback
+  }
+  return ['1', 'true', 'yes', 'on'].includes(raw)
+}
+
 function envNumber(name: string, fallback: number): number {
   const value = Number(process.env[name])
   return Number.isFinite(value) ? value : fallback
@@ -69,7 +93,22 @@ export const config = {
   /** When non-empty, HTTP (except `/health`) and WebSocket require `Authorization: Bearer …`. */
   apiKey: process.env.MOCHI_API_KEY?.trim() || '',
   llamaUrl: process.env.LLAMA_URL?.trim() || 'http://127.0.0.1:8080',
-  geminiKey: process.env.GEMINI_API_KEY?.trim() || '',
+  /** Auto-spawn a local llama.cpp server so `pnpm dev` is self-sufficient. */
+  llamaSpawn: envBool('LLAMA_SPAWN', true),
+  llamaBinary: expandHome(process.env.LLAMA_BINARY?.trim() || ''),
+  llamaModel: expandHome(process.env.LLAMA_MODEL?.trim() || ''),
+  llamaHost: process.env.LLAMA_HOST?.trim() || '127.0.0.1',
+  llamaPort: envNumber('LLAMA_PORT', 8080),
+  llamaCtxSize: envNumber('LLAMA_CTX_SIZE', 2048),
+  llamaThreads: envNumber('LLAMA_THREADS', 0),
+  /** Primary AI backend. */
+  openrouterKey: process.env.OPENROUTER_API_KEY?.trim() || '',
+  openrouterModel: process.env.OPENROUTER_MODEL?.trim() || 'openrouter/owl-alpha',
+  openrouterBaseUrl: process.env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1',
+  /** Cloud fallback when the primary backend is unavailable. */
+  deepseekKey: process.env.DEEPSEEK_API_KEY?.trim() || '',
+  deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || 'deepseek-chat',
+  deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL?.trim() || 'https://api.deepseek.com',
   host: process.env.HOST?.trim() || '0.0.0.0',
   port: envNumber('PORT', 3000),
   xpPerChat: envNumber('XP_PER_CHAT', 10),
