@@ -209,10 +209,20 @@ export function runMigrations() {
       created_at TEXT NOT NULL DEFAULT (${nowSql}),
       last_used_at TEXT NOT NULL DEFAULT (${nowSql})
     );
+
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT 'New chat',
+      created_at TEXT NOT NULL DEFAULT (${nowSql}),
+      last_message_at TEXT
+    );
   `)
 
   ensureColumn('members', 'household_id INTEGER REFERENCES households(id) ON DELETE CASCADE')
   ensureColumn('interactions', 'household_id INTEGER REFERENCES households(id) ON DELETE CASCADE')
+  ensureColumn('interactions', 'session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE')
   ensureColumn('memories', 'household_id INTEGER REFERENCES households(id) ON DELETE CASCADE')
   ensureColumn('affection', 'household_id INTEGER REFERENCES households(id) ON DELETE CASCADE')
   ensureColumn('mood_log', 'household_id INTEGER REFERENCES households(id) ON DELETE CASCADE')
@@ -226,6 +236,14 @@ export function runMigrations() {
   ensureIndex(
     'interactions_household_idx',
     'CREATE INDEX interactions_household_idx ON interactions (household_id, created_at)',
+  )
+  ensureIndex(
+    'interactions_session_idx',
+    'CREATE INDEX interactions_session_idx ON interactions (session_id, created_at)',
+  )
+  ensureIndex(
+    'chat_sessions_household_idx',
+    'CREATE INDEX chat_sessions_household_idx ON chat_sessions (household_id, last_message_at)',
   )
   ensureIndex(
     'memories_household_idx',
@@ -319,5 +337,38 @@ export function runMigrations() {
     }
 
     createLegacyAccounts()
+  }
+
+  importLegacyInteractionsIntoSessions()
+}
+
+function importLegacyInteractionsIntoSessions() {
+  const households = db
+    .prepare(
+      `SELECT DISTINCT household_id AS id
+       FROM interactions
+       WHERE session_id IS NULL`,
+    )
+    .all() as Array<{ id: number }>
+
+  if (households.length === 0) {
+    return
+  }
+
+  for (const { id: householdId } of households) {
+    const created = db
+      .prepare(
+        `INSERT INTO chat_sessions (household_id, member_id, title, created_at, last_message_at)
+         SELECT ?, MIN(member_id), 'Previous chats', MIN(created_at), MAX(created_at)
+         FROM interactions
+         WHERE household_id = ? AND session_id IS NULL`,
+      )
+      .run(householdId, householdId)
+
+    db.prepare(
+      `UPDATE interactions
+       SET session_id = ?
+       WHERE household_id = ? AND session_id IS NULL`,
+    ).run(Number(created.lastInsertRowid), householdId)
   }
 }
