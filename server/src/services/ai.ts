@@ -1,19 +1,20 @@
-import { geminiReply } from './gemini.ts'
-import { llamaReply } from './llama.ts'
+import { openrouterReply } from './openrouter.ts'
+import { deepseekReply } from './deepseek.ts'
+import type { ChatMessage } from './prompt.ts'
 
-export async function getReply(prompt: string) {
+export async function getReply(messages: ChatMessage[]) {
   try {
-    const reply = await llamaReply(prompt)
-    console.info('AI source: llama')
+    const reply = await openrouterReply(messages)
+    console.info('AI source: openrouter')
     return reply
   } catch (error) {
     console.warn(
-      'Llama failed, falling back to Gemini:',
+      'OpenRouter failed, falling back to DeepSeek:',
       error instanceof Error ? error.message : error,
     )
   }
 
-  const reply = await geminiReply(prompt)
-  console.info('AI source: gemini')
+  const reply = await deepseekReply(messages)
+  console.info('AI source: deepseek')
   return reply
 }
