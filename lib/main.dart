@@ -22,8 +22,9 @@ import 'widgets/create_member_dialog.dart';
 import 'widgets/mochi_bottom_nav_bar.dart';
 import 'widgets/mochi_toast.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ServerConfig.instance.load();
   runApp(const MochiApp());
 }
 
@@ -404,6 +405,38 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _handleServerUrlChanged(String url) async {
+    await ServerConfig.instance.setUrl(url);
+
+    try {
+      await _apiService.logout();
+    } catch (_) {}
+
+    await SessionStore.instance.clearSessionToken();
+    await _petProvider.clearSession();
+    _memberProvider.clearSession();
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _session = null;
+      _bootstrapError = null;
+      _selectedTabIndex = 1;
+      _didAutoShowMoodSheetThisSession = false;
+      _checkingAuth = false;
+      _bootstrapping = false;
+    });
+
+    _showToast(
+      'Server URL updated. Sign in to continue.',
+      title: 'Server changed',
+      tone: MochiToastTone.success,
+      icon: Icons.dns_rounded,
+    );
+  }
+
   Future<void> _handleSendMessage(String text, {String inputType = 'text'}) async {
     final Member member = _memberProvider.currentMember;
 
@@ -735,6 +768,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
             memberProvider: _memberProvider,
             onCreateMember: _openCreateMemberDialog,
             onLogout: _handleLogout,
+            onServerUrlChanged: _handleServerUrlChanged,
           ),
         ];
 
@@ -761,12 +795,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
                         ),
                         Expanded(
                           child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              16,
-                              0,
-                              16,
-                              MochiBottomNavBar.overlayPadding(context),
-                            ),
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                             child: IndexedStack(
                               index: _selectedTabIndex,
                               children: tabs,
@@ -987,7 +1016,7 @@ class _HeaderCardState extends State<_HeaderCard> {
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         child: Container(
-          padding: EdgeInsets.fromLTRB(18, _collapsed ? 12 : 16, 18, 12),
+          padding: EdgeInsets.fromLTRB(14, _collapsed ? 8 : 10, 14, 8),
           decoration: pixelCardDecoration(MochiPalette.cloudBlue),
           child: _collapsed
               ? _CollapsedHeader(
@@ -1027,31 +1056,41 @@ class _ExpandedHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Row(
           children: <Widget>[
             Container(
-              width: 52,
-              height: 52,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: MochiPalette.yellow,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: MochiPalette.ink, width: 2.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: MochiPalette.ink, width: 2),
               ),
-              child: const Icon(Icons.pets_rounded, color: MochiPalette.ink),
+              child: const Icon(
+                Icons.pets_rounded,
+                size: 20,
+                color: MochiPalette.ink,
+              ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Text(
                     AppConfig.appTitle,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontSize: 17,
+                        ),
                   ),
                   Text(
-                    '${session.household.name} • code ${session.household.code}',
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    '${session.household.name} • ${session.household.code}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontSize: 12,
+                        ),
                   ),
                 ],
               ),
@@ -1065,33 +1104,34 @@ class _ExpandedHeader extends StatelessWidget {
                   ? Icons.cloud_done_rounded
                   : Icons.cloud_off_rounded,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             if (memberProvider.isAdmin)
               InkWell(
                 onTap: onCreateMember,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(12),
                 child: Container(
-                  width: 42,
-                  height: 42,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: MochiPalette.ink, width: 2.5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: MochiPalette.ink, width: 2),
                   ),
                   child: const Icon(
                     Icons.person_add_alt_1_rounded,
+                    size: 18,
                     color: MochiPalette.ink,
                   ),
                 ),
               ),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
         Align(
           alignment: Alignment.centerLeft,
           child: Wrap(
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 8,
+            runSpacing: 8,
             children: List<Widget>.generate(memberProvider.members.length, (
               int index,
             ) {
@@ -1102,49 +1142,55 @@ class _ExpandedHeader extends StatelessWidget {
               return AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
+                  horizontal: 10,
+                  vertical: 7,
                 ),
                 decoration: BoxDecoration(
                   color: selected
                       ? member.color.withValues(alpha: 0.28)
                       : Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: MochiPalette.ink, width: 2.5),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: MochiPalette.ink, width: 2),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Container(
-                      width: 34,
-                      height: 34,
+                      width: 26,
+                      height: 26,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: member.color,
                         shape: BoxShape.circle,
-                        border: Border.all(color: MochiPalette.ink, width: 2),
+                        border: Border.all(color: MochiPalette.ink, width: 1.5),
                       ),
                       child: Text(
                         member.initials,
-                        style: Theme.of(context).textTheme.labelLarge,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              fontSize: 11,
+                            ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             Text(
                               member.name,
-                              style: Theme.of(context).textTheme.labelLarge,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelLarge
+                                  ?.copyWith(fontSize: 12),
                             ),
                             if (member.isAdmin) ...<Widget>[
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 4),
                               const Icon(
                                 Icons.admin_panel_settings_rounded,
-                                size: 16,
+                                size: 14,
                               ),
                             ],
                           ],
@@ -1154,7 +1200,9 @@ class _ExpandedHeader extends StatelessWidget {
                               (member.invitePending
                                   ? 'Invite pending'
                                   : 'Ready'),
-                          style: Theme.of(context).textTheme.bodyMedium,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontSize: 11,
+                              ),
                         ),
                       ],
                     ),
@@ -1164,7 +1212,7 @@ class _ExpandedHeader extends StatelessWidget {
             }),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         _DragHandle(
           label: 'Drag up to hide household roster',
           icon: Icons.keyboard_arrow_up_rounded,
@@ -1196,31 +1244,43 @@ class _CollapsedHeader extends StatelessWidget {
         Row(
           children: <Widget>[
             Container(
-              width: 36,
-              height: 36,
+              width: 28,
+              height: 28,
               decoration: BoxDecoration(
                 color: MochiPalette.yellow,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: MochiPalette.ink, width: 2),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: MochiPalette.ink, width: 1.5),
               ),
-              child: const Icon(Icons.pets_rounded, color: MochiPalette.ink),
+              child: const Icon(
+                Icons.pets_rounded,
+                size: 16,
+                color: MochiPalette.ink,
+              ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Text('Mochi', style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'Mochi',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontSize: 14,
+                        ),
+                  ),
                   Text(
                     '$memberCount accounts • ${currentMember.name} • $householdCode',
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontSize: 12,
+                        ),
                   ),
                 ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         _DragHandle(
           label: 'Drag down to show household roster',
           icon: Icons.keyboard_arrow_down_rounded,
@@ -1248,25 +1308,30 @@ class _DragHandle extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Container(
-              width: 44,
-              height: 6,
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
                 color: MochiPalette.ink.withValues(alpha: 0.24),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Icon(icon, size: 16, color: MochiPalette.ink),
+                Icon(icon, size: 14, color: MochiPalette.ink),
                 const SizedBox(width: 4),
-                Text(label, style: Theme.of(context).textTheme.bodyMedium),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontSize: 11,
+                      ),
+                ),
               ],
             ),
           ],
@@ -1290,18 +1355,23 @@ class _InfoBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: MochiPalette.ink, width: 2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MochiPalette.ink, width: 1.5),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 16, color: MochiPalette.ink),
-          const SizedBox(width: 6),
-          Text(label, style: Theme.of(context).textTheme.labelLarge),
+          Icon(icon, size: 13, color: MochiPalette.ink),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontSize: 11,
+                ),
+          ),
         ],
       ),
     );
