@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
 
+// Hallmark · component: bottom-navigation · genre: playful
+// Redesign: compact floating pill. Smaller icon-only buttons, no top pixels,
+// rounded capsule shape with margin, and a lighter footprint.
 class MochiBottomNavBar extends StatelessWidget {
   const MochiBottomNavBar({
     super.key,
@@ -12,7 +16,7 @@ class MochiBottomNavBar extends StatelessWidget {
     required this.onSelected,
   });
 
-  static const double baseHeight = 118;
+  static const double baseHeight = 68;
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
@@ -43,58 +47,48 @@ class MochiBottomNavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final double bottomInset = MediaQuery.paddingOf(context).bottom;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.98),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(32),
-          topRight: Radius.circular(32),
-        ),
-        border: Border(
-          top: const BorderSide(color: MochiPalette.ink, width: 3),
-          left: const BorderSide(color: MochiPalette.ink, width: 3),
-          right: const BorderSide(color: MochiPalette.ink, width: 3),
-        ),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: MochiPalette.cloudBlue.withValues(alpha: 0.45),
-            offset: const Offset(0, -6),
-            blurRadius: 0,
-          ),
-        ],
-      ),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 860),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(12, 10, 12, 10 + bottomInset),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const <Widget>[
-                    _TopPixel(color: MochiPalette.lightPink),
-                    SizedBox(width: 8),
-                    _TopPixel(color: MochiPalette.cloudBlue),
-                    SizedBox(width: 8),
-                    _TopPixel(color: MochiPalette.yellow),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: List<Widget>.generate(_items.length, (int index) {
-                    final _NavItemData item = _items[index];
-                    return Expanded(
-                      child: _NavButton(
-                        item: item,
-                        selected: selectedIndex == index,
-                        onTap: () => onSelected(index),
-                      ),
-                    );
-                  }),
+          constraints: const BoxConstraints(maxWidth: 280),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: MochiPalette.cloudBlue.withValues(alpha: 0.45),
+                  offset: const Offset(4, 4),
+                  blurRadius: 6,
                 ),
               ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(28),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: MochiPalette.background.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: MochiPalette.ink, width: 3),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    child: Row(
+                      children: List<Widget>.generate(_items.length, (int index) {
+                        final _NavItemData item = _items[index];
+                        return Expanded(
+                          child: _NavButton(
+                            item: item,
+                            selected: selectedIndex == index,
+                            onTap: () => onSelected(index),
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -128,91 +122,58 @@ class _NavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          decoration: BoxDecoration(
-            color: selected
-                ? item.accent.withValues(alpha: 0.38)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: selected ? MochiPalette.ink : Colors.transparent,
-              width: 2,
+    return Tooltip(
+      message: item.label,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              color: selected
+                  ? item.accent.withValues(alpha: 0.38)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: selected ? MochiPalette.ink : Colors.transparent,
+                width: 2,
+              ),
+              boxShadow: selected
+                  ? <BoxShadow>[
+                      BoxShadow(
+                        color: item.accent.withValues(alpha: 0.85),
+                        offset: const Offset(3, 3),
+                        blurRadius: 0,
+                      ),
+                    ]
+                  : const <BoxShadow>[],
             ),
-            boxShadow: selected
-                ? <BoxShadow>[
-                    BoxShadow(
-                      color: item.accent.withValues(alpha: 0.85),
-                      offset: const Offset(4, 4),
-                      blurRadius: 0,
-                    ),
-                  ]
-                : const <BoxShadow>[],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              AnimatedScale(
-                scale: selected ? 1.06 : 1,
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: selected ? 1 : 0.92),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: MochiPalette.ink, width: 2),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(2),
-                    child: SizedBox(
-                      width: 54,
-                      height: 54,
-                      child: _SvgAssetIcon(assetPath: item.assetPath),
-                    ),
+            child: AnimatedScale(
+              scale: selected ? 1.06 : 1,
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: selected ? 1 : 0.92),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: MochiPalette.ink, width: 2),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: _SvgAssetIcon(assetPath: item.assetPath),
                   ),
                 ),
               ),
-              const SizedBox(height: 6),
-              AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                style: Theme.of(context).textTheme.labelLarge!.copyWith(
-                  color: selected
-                      ? MochiPalette.ink
-                      : MochiPalette.ink.withValues(alpha: 0.55),
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
-                child: Text(item.label),
-              ),
-            ],
+            ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _TopPixel extends StatelessWidget {
-  const _TopPixel({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 18,
-      height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: MochiPalette.ink, width: 1.5),
       ),
     );
   }
