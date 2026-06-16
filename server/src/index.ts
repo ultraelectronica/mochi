@@ -8,6 +8,7 @@ import { startDailyCleanupJob } from './jobs/daily-cleanup.ts'
 import { config } from './config/index.ts'
 import db from './db/index.ts'
 import { runMigrations } from './db/migrations.ts'
+import { ensureLocalLlama, stopLocalLlama } from './services/local-llama.ts'
 import { requireAccount, requireApiKey } from './middleware/auth.ts'
 import { rateLimiter } from './middleware/rate-limiter.ts'
 import authRoutes from './routes/auth.ts'
@@ -73,8 +74,15 @@ initWS(server)
 startMoodDecayJob()
 startDailyCleanupJob()
 
+// Best-effort: start the local TinyLlama server alongside the API so a single
+// `pnpm dev` is enough. Never blocks startup forever, and never throws.
+ensureLocalLlama().catch((error) => {
+  console.warn('ensureLocalLlama failed:', error instanceof Error ? error.message : error)
+})
+
 function shutdown() {
   console.info('Shutting down gracefully…')
+  stopLocalLlama()
   db.close()
   server.close()
   process.exit(0)
