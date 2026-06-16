@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../models/auth_session.dart';
+import '../models/chat_session.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
@@ -196,11 +197,12 @@ class ApiService {
     await _request('DELETE', '/members/$memberId');
   }
 
-  Future<List<ChatEntry>> fetchChatHistory({int limit = 30}) async {
-    final List<dynamic> json = await _getList(
-      '/chat',
-      queryParameters: <String, String>{'limit': '$limit'},
-    );
+  Future<List<ChatEntry>> fetchChatHistory({int? sessionId, int limit = 30}) async {
+    final Map<String, String> query = <String, String>{'limit': '$limit'};
+    if (sessionId != null) {
+      query['session_id'] = '$sessionId';
+    }
+    final List<dynamic> json = await _getList('/chat', queryParameters: query);
 
     return json
         .whereType<Map<String, dynamic>>()
@@ -208,12 +210,16 @@ class ApiService {
         .toList(growable: false);
   }
 
-  Future<({String reply, Pet pet})> sendMessage({
+  Future<({String reply, Pet pet, int? sessionId})> sendMessage({
     required int memberId,
     required String text,
+    int? sessionId,
     String inputType = 'text',
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{'text': text};
+    if (sessionId != null) {
+      body['session_id'] = sessionId;
+    }
     if (inputType == 'voice') {
       body['input_type'] = 'voice';
     }
@@ -223,12 +229,29 @@ class ApiService {
       body,
     );
 
+    final Object? rawSessionId = json['session_id'];
     return (
       reply: json['reply'] as String? ?? '',
       pet: Pet.fromJson(
         json['pet'] as Map<String, dynamic>? ?? <String, dynamic>{},
       ),
+      sessionId: rawSessionId == null ? null : _asInt(rawSessionId),
     );
+  }
+
+  Future<List<ChatSession>> fetchChatSessions({int limit = 50}) async {
+    final List<dynamic> json = await _getList(
+      '/chat/sessions',
+      queryParameters: <String, String>{'limit': '$limit'},
+    );
+    return json
+        .whereType<Map<String, dynamic>>()
+        .map(ChatSession.fromJson)
+        .toList(growable: false);
+  }
+
+  Future<void> deleteChatSession(int sessionId) async {
+    await _request('DELETE', '/chat/sessions/$sessionId');
   }
 
   Future<({Pet pet, int xpAwarded})> checkInMood({
