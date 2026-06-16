@@ -1,11 +1,54 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class AppConfig {
-  static const String appTitle = 'Mochi';
-  static const String serverUrl = String.fromEnvironment(
+/// Editable, persisted server address so a distributed APK can be pointed at
+/// the household's host device without rebuilding. Defaults to the build-time
+/// `MOCHI_SERVER_URL` dart-define (or localhost).
+class ServerConfig {
+  ServerConfig._();
+  static final ServerConfig instance = ServerConfig._();
+
+  static const String _prefKey = 'mochi_server_url';
+  static const String _default = String.fromEnvironment(
     'MOCHI_SERVER_URL',
     defaultValue: 'http://127.0.0.1:3000',
   );
+
+  String _url = _default;
+  bool _loaded = false;
+
+  String get url => _url;
+
+  Future<void> load() async {
+    if (_loaded) {
+      return;
+    }
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? saved = prefs.getString(_prefKey);
+    if (saved != null && saved.trim().isNotEmpty) {
+      _url = saved.trim();
+    }
+    _loaded = true;
+  }
+
+  Future<void> setUrl(String url) async {
+    final String trimmed = url.trim();
+    _url = trimmed.isEmpty ? _default : trimmed;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefKey, _url);
+  }
+
+  Future<void> reset() async {
+    _url = _default;
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefKey);
+  }
+}
+
+class AppConfig {
+  static const String appTitle = 'Mochi';
+
+  static String get serverUrl => ServerConfig.instance.url;
 
   /// Must match server `MOCHI_API_KEY` when the server has auth enabled. Pass via
   /// `--dart-define=MOCHI_API_KEY=...` (same value as in `server/.env`).
