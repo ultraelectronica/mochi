@@ -1,28 +1,40 @@
 import axios from 'axios'
 
 import { config } from '../config/index.ts'
+import type { ChatMessage } from './prompt.ts'
 
 function withTrailingSlash(url: string) {
-  return url.endsWith('/') ? url : `${url}/`
+  return url.endsWith('/') ? url.slice(0, -1) : url
 }
 
-function cleanReply(text: string) {
-  const compact = text
+/** Shared reply tidy-up used by every model backend. */
+export function cleanReply(text: string, userText?: string) {
+  const firstTurn = text
+    .split(/<\|user\|>|<\|system\|>|<\/s>|<\|end\|>|\bMochi:|\bUser:|\bHuman:|\bAssistant:|\bMochi\s+response:|\bMochi\s+says:/i)[0]
+
+  let compact = firstTurn
     .replace(/<\|assistant\|>/g, '')
-    .replace(/<\|user\|>/g, '')
-    .replace(/<\|system\|>/g, '')
-    .replace(/^mochi:\s*/i, '')
+    .replace(/^mochi[\s']*(response|says|replied)?:\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (compact.length <= 280) {
+  if (userText) {
+    const escaped = userText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    compact = compact.replace(new RegExp(`^${escaped}\\s*`, 'i'), '').trim()
+  }
+
+  if (!compact || !/[a-z0-9]/i.test(compact)) {
+    return ''
+  }
+
+  if (compact.length <= 200) {
     return compact
   }
 
-  const slice = compact.slice(0, 280)
+  const slice = compact.slice(0, 200)
   const boundary = Math.max(slice.lastIndexOf('.'), slice.lastIndexOf('!'), slice.lastIndexOf('?'))
 
-  if (boundary >= 80) {
+  if (boundary >= 40) {
     return slice.slice(0, boundary + 1).trim()
   }
 
@@ -31,7 +43,7 @@ function cleanReply(text: string) {
 
 export async function pingLlama() {
   try {
-    await axios.get(new URL('health', withTrailingSlash(config.llamaUrl)).toString(), {
+    await axios.get(`${withTrailingSlash(config.llamaUrl)}/health`, {
       timeout: 1500,
     })
     return true
@@ -40,33 +52,43 @@ export async function pingLlama() {
   }
 }
 
-export async function llamaReply(prompt: string) {
+/**
+ * TinyLlama often ignores EOS and invents extra turns, so we pass explicit
+ * stop strings — the chat-template markers plus the member's name faking the
+ * next user turn. DeepSeek does not need these.
+ */
+export async function llamaReply(messages: ChatMessage[], stops: string[] = []) {
   const response = await axios.post(
-    new URL('completion', withTrailingSlash(config.llamaUrl)).toString(),
+    `${withTrailingSlash(config.llamaUrl)}/v1/chat/completions`,
     {
-      prompt,
-      n_predict: 150,
-      temp: 0.75,
+      model: 'local',
+      messages,
       temperature: 0.75,
-      stop: ['<|user|>', '<|system|>'],
+      max_tokens: 80,
+      stream: false,
+      stop: ['<|user|>', '<|system|>', '</s>', ...stops],
     },
     {
-      timeout: 10_000,
+      timeout: 12_000,
     },
   )
 
   const rawReply =
-    typeof response.data?.content === 'string'
-      ? response.data.content
-      : typeof response.data?.response === 'string'
-        ? response.data.response
-        : typeof response.data?.choices?.[0]?.text === 'string'
-          ? response.data.choices[0].text
-          : ''
+    typeof response.data?.choices?.[0]?.message?.content === 'string'
+      ? response.data.choices[0].message.content
+      : typeof response.data?.choices?.[0]?.text === 'string'
+        ? response.data.choices[0].text
+        : ''
 
   if (!rawReply.trim()) {
     throw new Error('Llama returned an empty reply')
   }
 
-  return cleanReply(rawReply)
+  const userMsg = messages.findLast((m) => m.role === 'user')
+  const cleaned = cleanReply(rawReply, userMsg?.content)
+  if (!cleaned) {
+    throw new Error('Llama reply was unusable')
+  }
+
+  return cleaned
 }
