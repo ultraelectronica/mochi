@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/chat_session.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
@@ -29,6 +30,8 @@ class PetProvider extends ChangeNotifier {
 
   Pet? _pet;
   List<ChatEntry> _chatEntries = <ChatEntry>[];
+  List<ChatSession> _sessions = <ChatSession>[];
+  int? _activeSessionId;
   List<ActivityEntry> _feedEntries = <ActivityEntry>[];
   List<MemorySnippet> _memories = <MemorySnippet>[];
   Map<int, MochiMood> _memberCheckIns = <int, MochiMood>{};
@@ -45,6 +48,10 @@ class PetProvider extends ChangeNotifier {
 
   Pet get pet => _pet!;
   List<ChatEntry> get chatEntries => List<ChatEntry>.unmodifiable(_chatEntries);
+  List<ChatSession> get sessions =>
+      List<ChatSession>.unmodifiable(_sessions);
+  int? get activeSessionId => _activeSessionId;
+  bool get isActiveSessionNew => _activeSessionId == null;
   List<ActivityEntry> get feedEntries =>
       List<ActivityEntry>.unmodifiable(_feedEntries);
   List<MemorySnippet> get memories =>
@@ -81,6 +88,8 @@ class PetProvider extends ChangeNotifier {
   Future<void> initialize() async {
     _isLoading = true;
     _errorMessage = null;
+    _activeSessionId = null;
+    _chatEntries = <ChatEntry>[];
     notifyListeners();
 
     try {
@@ -158,7 +167,8 @@ class PetProvider extends ChangeNotifier {
       ];
 
       if (includeChat) {
-        requests.add(_apiService.fetchChatHistory());
+        requests.add(_apiService.fetchChatHistory(sessionId: _activeSessionId));
+        requests.add(_apiService.fetchChatSessions());
       }
 
       final List<Object> results = await Future.wait<Object>(requests);
@@ -169,6 +179,7 @@ class PetProvider extends ChangeNotifier {
       _memberCheckIns = results[3] as Map<int, MochiMood>;
       if (includeChat) {
         _chatEntries = results[4] as List<ChatEntry>;
+        _sessions = results[5] as List<ChatSession>;
       }
       _serverOnline = true;
       _errorMessage = null;
@@ -197,13 +208,18 @@ class PetProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final ({String reply, Pet pet}) result = await _apiService.sendMessage(
+      final ({String reply, Pet pet, int? sessionId}) result =
+          await _apiService.sendMessage(
         memberId: member.id,
         text: text,
+        sessionId: _activeSessionId,
         inputType: inputType,
       );
 
       _pet = result.pet;
+      if (result.sessionId != null) {
+        _activeSessionId = result.sessionId;
+      }
       _chatEntries = <ChatEntry>[
         ..._chatEntries,
         ChatEntry.local(author: 'Mochi', text: result.reply, isPet: true),
@@ -216,7 +232,12 @@ class PetProvider extends ChangeNotifier {
       }
 
       try {
-        await refreshState(includeHealth: false, includeChat: true);
+        final List<Object> results = await Future.wait<Object>([
+          _apiService.fetchChatHistory(sessionId: _activeSessionId),
+          _apiService.fetchChatSessions(),
+        ]);
+        _chatEntries = results[0] as List<ChatEntry>;
+        _sessions = results[1] as List<ChatSession>;
       } catch (_) {
         notifyListeners();
       }
@@ -227,6 +248,55 @@ class PetProvider extends ChangeNotifier {
     } finally {
       _replyPending = false;
       notifyListeners();
+    }
+  }
+
+  void startNewSession() {
+    _activeSessionId = null;
+    _chatEntries = <ChatEntry>[];
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> selectSession(int sessionId) async {
+    if (_activeSessionId == sessionId) {
+      return;
+    }
+    _activeSessionId = sessionId;
+    _chatEntries = <ChatEntry>[];
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _chatEntries = await _apiService.fetchChatHistory(sessionId: sessionId);
+      _serverOnline = true;
+      _errorMessage = null;
+    } catch (error) {
+      _applyError(error);
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteSession(int sessionId) async {
+    await _apiService.deleteChatSession(sessionId);
+    _sessions = List<ChatSession>.from(_sessions)
+      ..removeWhere((ChatSession session) => session.id == sessionId);
+    if (_activeSessionId == sessionId) {
+      _activeSessionId = null;
+      _chatEntries = <ChatEntry>[];
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadSessions() async {
+    try {
+      _sessions = await _apiService.fetchChatSessions();
+      notifyListeners();
+    } catch (error) {
+      _applyError(error);
+      rethrow;
     }
   }
 
@@ -307,6 +377,8 @@ class PetProvider extends ChangeNotifier {
     _webSocketSubscription = null;
     _pet = null;
     _chatEntries = <ChatEntry>[];
+    _sessions = <ChatSession>[];
+    _activeSessionId = null;
     _feedEntries = <ActivityEntry>[];
     _memories = <MemorySnippet>[];
     _memberCheckIns = <int, MochiMood>{};
@@ -355,7 +427,7 @@ class PetProvider extends ChangeNotifier {
     }
 
     try {
-      await refreshState(includeHealth: false, includeChat: true);
+      await refreshState(includeHealth: false, includeChat: !_replyPending);
     } catch (_) {
       // Keep the last known state if the follow-up refresh fails.
     }
