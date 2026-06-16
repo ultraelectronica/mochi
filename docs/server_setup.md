@@ -29,7 +29,9 @@ Edit `server/.env`:
 | `PORT` | HTTP listen port (default `3000`). |
 | `MOCHI_API_KEY` | Optional. If set to a non-empty value, every HTTP route **except** `GET /health` and every **WebSocket** connection requires header `Authorization: Bearer <same value>`. Leave empty for fully open local dev. |
 | `LLAMA_URL` | Base URL for local llama.cpp HTTP API (default `http://127.0.0.1:8080`). |
-| `GEMINI_API_KEY` | Used when the local model is unavailable. |
+| `LLAMA_SPAWN` | `1` (default) auto-starts a local `llama-server` as a child process when `LLAMA_BINARY` + `LLAMA_MODEL` exist, so a single `pnpm dev` is enough. Set `0` to manage it yourself. |
+| `LLAMA_BINARY` / `LLAMA_MODEL` | Paths to the llama.cpp `llama-server` binary and the TinyLlama `.gguf` model. `~` is expanded automatically. |
+| `DEEPSEEK_API_KEY` | Cloud fallback used when the local model is unavailable. |
 
 ### Start the server (foreground)
 
@@ -189,14 +191,18 @@ Edit `server/.env` for local PC development, for example:
 PORT=3000
 MOCHI_API_KEY=
 LLAMA_URL=http://127.0.0.1:8080
-GEMINI_API_KEY=your_key_here
+LLAMA_SPAWN=1
+LLAMA_BINARY=~/llama.cpp/build/bin/llama-server
+LLAMA_MODEL=~/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+DEEPSEEK_API_KEY=your_key_here
 MOOD_DECAY_HOURS=12
 XP_PER_CHAT=10
 XP_PER_CHECKIN=5
 XP_PER_TAP=2
 ```
 
-- Set **`GEMINI_API_KEY`** so the backend can fall back when the local model is down or unreachable.
+- With **`LLAMA_SPAWN=1`** (default) and valid `LLAMA_BINARY` + `LLAMA_MODEL`, `pnpm dev` starts the local `llama-server` for you. You no longer need to run it in a separate terminal.
+- Set **`DEEPSEEK_API_KEY`** so the backend can fall back when the local model is down or unreachable.
 - Set **`MOCHI_API_KEY`** when you want Bearer auth; then add `-H "Authorization: Bearer <key>"` to `curl` examples below and pass `--dart-define=MOCHI_API_KEY=...` to Flutter (see **Running on a PC**).
 
 Do **not** rely on a `DATABASE_URL` variable — this project does not read it; SQLite lives at **`server/mochi.db`**.
@@ -340,7 +346,10 @@ Create `server/.env` on the phone (or copy from `.env.example` on PC — see **R
 PORT=3000
 MOCHI_API_KEY=
 LLAMA_URL=http://127.0.0.1:8080
-GEMINI_API_KEY=your_key_here
+LLAMA_SPAWN=1
+LLAMA_BINARY=~/llama.cpp/build/bin/llama-server
+LLAMA_MODEL=~/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
+DEEPSEEK_API_KEY=your_key_here
 MOOD_DECAY_HOURS=12
 XP_PER_CHAT=10
 XP_PER_CHECKIN=5
@@ -464,7 +473,7 @@ pm2 logs mochi-server --err
 If `POST /chat` fails, the server is usually fine and the missing piece is one of these:
 
 - `llama-server` is not reachable at `LLAMA_URL`
-- `GEMINI_API_KEY` is missing, so fallback cannot run
+- `DEEPSEEK_API_KEY` is missing, so fallback cannot run
 
 Quick checks:
 
