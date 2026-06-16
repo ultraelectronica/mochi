@@ -8,6 +8,7 @@ import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
 import '../widgets/member_avatar.dart';
 import '../widgets/pet_sprite.dart';
+import '../widgets/mochi_bottom_nav_bar.dart';
 import '../widgets/xp_bar.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -38,9 +39,11 @@ class HomeScreen extends StatelessWidget {
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool wide = constraints.maxWidth >= 920;
 
-        return SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 24),
-          child: Column(
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(
+        bottom: MochiBottomNavBar.overlayPadding(context) + 24,
+      ),
+      child: Column(
             children: <Widget>[
               if (wide)
                 Row(
@@ -151,17 +154,17 @@ class _HeroPanel extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        Text(
-          'One shared pet, one bright family room.',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
         const SizedBox(height: 10),
         Text(
-          petProvider.greetingFor(currentMember.name),
-          style: Theme.of(context).textTheme.bodyLarge,
+          'One shared pet, one bright family room.',
+          style: Theme.of(context).textTheme.titleLarge,
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 6),
+        Text(
+          petProvider.greetingFor(currentMember.name),
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 10),
         XpBar(
           value: pet.stageProgress,
           color: MochiPalette.sky,
@@ -169,7 +172,7 @@ class _HeroPanel extends StatelessWidget {
               ? 'Max growth reached - ${pet.xp} XP total'
               : '${pet.xp} XP of ${pet.nextStageXp} XP toward ${pet.nextStage!.label}',
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 10,
           runSpacing: 10,
@@ -182,12 +185,7 @@ class _HeroPanel extends StatelessWidget {
             _MiniStatCard(label: 'Family', value: '$totalMembers members'),
           ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          'Profile details, memories, check-ins, and feed previews now live directly on Home for this draft.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         FilledButton.icon(
           onPressed: onOpenChat,
           icon: const Icon(Icons.chat_bubble_rounded),
@@ -198,8 +196,8 @@ class _HeroPanel extends StatelessWidget {
 
     final Widget petBlock = Column(
       children: <Widget>[
-        PetSprite(pet: pet, size: 250, onTap: onPetTap),
-        const SizedBox(height: 8),
+        PetSprite(pet: pet, size: 200, onTap: onPetTap),
+        const SizedBox(height: 6),
         Text(
           'Tap Mochi for a tiny reaction burst.',
           style: Theme.of(context).textTheme.bodyMedium,
@@ -208,7 +206,7 @@ class _HeroPanel extends StatelessWidget {
     );
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
       decoration: pixelCardDecoration(MochiPalette.lightPink),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
@@ -218,7 +216,7 @@ class _HeroPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 textBlock,
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 Center(child: petBlock),
               ],
             );
@@ -227,7 +225,7 @@ class _HeroPanel extends StatelessWidget {
           return Row(
             children: <Widget>[
               Expanded(flex: 5, child: textBlock),
-              const SizedBox(width: 18),
+              const SizedBox(width: 14),
               Expanded(flex: 4, child: Center(child: petBlock)),
             ],
           );
@@ -255,122 +253,235 @@ class _ProfilePanel extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      padding: const EdgeInsets.all(14),
       decoration: pixelCardDecoration(MochiPalette.yellow),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const _PanelTitle(
-            title: 'Pet profile on Home',
-            subtitle:
-                'Growth, memories, and affection are folded into the main hub.',
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: PetStage.values.map((PetStage stage) {
-              final bool unlocked =
-                  PetStage.values.indexOf(stage) <=
-                  PetStage.values.indexOf(pet.stage);
-              final bool current = stage == pet.stage;
-              return Container(
-                width: 132,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: current
-                      ? MochiPalette.yellow
-                      : unlocked
-                      ? MochiPalette.cloudBlue
-                      : MochiPalette.ink.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: MochiPalette.ink, width: 2),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  'Pet profile',
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Icon(
-                      current ? Icons.star_rounded : Icons.adjust_rounded,
-                      color: MochiPalette.ink,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      stage.label,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      stage.note,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Remembered snippets',
-            style: Theme.of(context).textTheme.titleMedium,
+              ),
+              _StagePill(stage: pet.stage.label),
+            ],
           ),
           const SizedBox(height: 10),
+          _StageTimeline(pet: pet),
+          const SizedBox(height: 12),
+          Text(
+            'Memories',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 8),
           if (memories.isEmpty)
             Text(
               'Mochi will save favorite family moments here after a few conversations.',
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(context).textTheme.bodySmall,
             )
           else
             ...memories.take(2).map((MemorySnippet memory) {
               return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _MemoryTile(memory: memory),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _CompactMemoryTile(memory: memory),
               );
             }),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
-            'Affection leaderboard',
-            style: Theme.of(context).textTheme.titleMedium,
+            'Affection',
+            style: Theme.of(context).textTheme.labelLarge,
           ),
-          const SizedBox(height: 10),
-          ...ranked.take(4).map((Member member) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: ranked.take(4).map((Member member) {
+              return _CompactMemberChip(member: member);
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StagePill extends StatelessWidget {
+  const _StagePill({required this.stage});
+
+  final String stage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: MochiPalette.yellow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Icon(Icons.star_rounded, size: 14, color: MochiPalette.ink),
+          const SizedBox(width: 4),
+          Text(stage, style: Theme.of(context).textTheme.labelLarge),
+        ],
+      ),
+    );
+  }
+}
+
+class _StageTimeline extends StatelessWidget {
+  const _StageTimeline({required this.pet});
+
+  final Pet pet;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> children = <Widget>[];
+    final int currentIndex = PetStage.values.indexOf(pet.stage);
+
+    for (int index = 0; index < PetStage.values.length; index++) {
+      final PetStage stage = PetStage.values[index];
+      final bool unlocked = index <= currentIndex;
+      final bool current = stage == pet.stage;
+
+      children.add(
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: current
+                  ? MochiPalette.yellow
+                  : unlocked
+                  ? MochiPalette.cloudBlue
+                  : MochiPalette.ink.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: current ? MochiPalette.ink : MochiPalette.ink.withValues(alpha: 0.25),
+                width: current ? 2 : 1.5,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  current ? Icons.star_rounded : Icons.adjust_rounded,
+                  size: 16,
+                  color: MochiPalette.ink,
                 ),
-                decoration: BoxDecoration(
-                  color: member.color.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: MochiPalette.ink, width: 2),
+                const SizedBox(height: 3),
+                Text(
+                  stage.label,
+                  style: Theme.of(context).textTheme.labelLarge,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                child: Row(
-                  children: <Widget>[
-                    MemberAvatar(member: member, size: 38),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            member.name,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          Text(
-                            '${member.affection} affection and ${member.xp} XP',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (index < PetStage.values.length - 1) {
+        final bool nextUnlocked = index + 1 <= currentIndex;
+        children.addAll(<Widget>[
+          const SizedBox(width: 6),
+          Container(
+            width: 8,
+            height: 2,
+            color: nextUnlocked
+                ? MochiPalette.ink.withValues(alpha: 0.35)
+                : MochiPalette.ink.withValues(alpha: 0.12),
+          ),
+          const SizedBox(width: 6),
+        ]);
+      }
+    }
+
+    return Row(children: children);
+  }
+}
+
+class _CompactMemoryTile extends StatelessWidget {
+  const _CompactMemoryTile({required this.memory});
+
+  final MemorySnippet memory;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: memory.accent.withValues(alpha: 0.24),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  memory.title,
+                  style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
-            );
-          }),
+              Text(
+                memory.timestamp,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            memory.body,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactMemberChip extends StatelessWidget {
+  const _CompactMemberChip({required this.member});
+
+  final Member member;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: member.color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          MemberAvatar(member: member, size: 26),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                member.name,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                '${member.affection}% · ${member.xp} XP',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -475,6 +586,9 @@ class _MoodSummaryPanel extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: TextButton(
               onPressed: onOpenFullScreen,
+              style: TextButton.styleFrom(
+                foregroundColor: MochiPalette.ink,
+              ),
               child: const Text('Open full screen'),
             ),
           ),
@@ -484,38 +598,85 @@ class _MoodSummaryPanel extends StatelessWidget {
   }
 }
 
-class _FeedPanel extends StatelessWidget {
+class _FeedPanel extends StatefulWidget {
   const _FeedPanel({required this.entries});
 
   final List<ActivityEntry> entries;
 
   @override
+  State<_FeedPanel> createState() => _FeedPanelState();
+}
+
+class _FeedPanelState extends State<_FeedPanel> {
+  bool _expanded = true;
+
+  @override
   Widget build(BuildContext context) {
+    final String summary = widget.entries.isEmpty
+        ? 'No activity yet'
+        : '${widget.entries.length} recent event${widget.entries.length == 1 ? '' : 's'}';
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: pixelCardDecoration(MochiPalette.mint),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const _PanelTitle(
-            title: 'Family activity feed',
-            subtitle:
-                'Chats, check-ins, and milestones stay visible from Home in this draft.',
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Family activity feed',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (!_expanded)
+                      Text(
+                        summary,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: () => setState(() => _expanded = !_expanded),
+                icon: Icon(
+                  _expanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  color: MochiPalette.ink,
+                ),
+                tooltip: _expanded ? 'Minimize feed' : 'Expand feed',
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          if (entries.isEmpty)
-            Text(
-              'The feed wakes up after the first chat, mood check-in, or pet tap.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            )
-          else
-            ...entries.take(4).map((ActivityEntry entry) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _FeedTile(entry: entry),
-              );
-            }),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            child: _expanded
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const SizedBox(height: 10),
+                      if (widget.entries.isEmpty)
+                        Text(
+                          'The feed wakes up after the first chat, mood check-in, or pet tap.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        )
+                      else
+                        ...widget.entries.take(4).map((ActivityEntry entry) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _FeedTile(entry: entry),
+                          );
+                        }),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     );
@@ -652,31 +813,4 @@ class _FeedTile extends StatelessWidget {
   }
 }
 
-class _MemoryTile extends StatelessWidget {
-  const _MemoryTile({required this.memory});
 
-  final MemorySnippet memory;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: memory.accent.withValues(alpha: 0.24),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: MochiPalette.ink, width: 2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(memory.title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 6),
-          Text(memory.body, style: Theme.of(context).textTheme.bodyLarge),
-          const SizedBox(height: 6),
-          Text(memory.timestamp, style: Theme.of(context).textTheme.bodyMedium),
-        ],
-      ),
-    );
-  }
-}
