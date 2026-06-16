@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/device_permission_service.dart';
 import '../services/floating_mochi_service.dart';
 import '../widgets/member_avatar.dart';
+import '../widgets/mochi_bottom_nav_bar.dart';
 import '../widgets/mochi_toast.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -21,6 +22,7 @@ class SettingsScreen extends StatefulWidget {
     required this.memberProvider,
     required this.onCreateMember,
     required this.onLogout,
+    required this.onServerUrlChanged,
   });
 
   final AuthSession session;
@@ -28,6 +30,7 @@ class SettingsScreen extends StatefulWidget {
   final MemberProvider memberProvider;
   final Future<void> Function() onCreateMember;
   final Future<void> Function() onLogout;
+  final Future<void> Function(String url) onServerUrlChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -97,6 +100,124 @@ class _SettingsScreenState extends State<SettingsScreen>
       return 'Yesterday';
     }
     return '${value.month}/${value.day}/${value.year}';
+  }
+
+  Future<void> _editServerUrl() async {
+    final TextEditingController controller = TextEditingController(
+      text: AppConfig.serverUrl,
+    );
+
+    String? validate(String? value) {
+      final String trimmed = (value ?? '').trim();
+      if (trimmed.isEmpty) {
+        return 'Enter a server URL.';
+      }
+      final Uri? parsed = Uri.tryParse(trimmed);
+      if (parsed == null ||
+          (parsed.scheme != 'http' && parsed.scheme != 'https') ||
+          parsed.host.isEmpty) {
+        return 'Use a full http:// or https:// address.';
+      }
+      return null;
+    }
+
+    final bool? saved = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        String? errorText;
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+        return AlertDialog(
+          title: const Text('Server URL'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Text(
+                'Point Mochi at the household host device, e.g. http://192.168.1.50:3000',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                autocorrect: false,
+                keyboardType: TextInputType.url,
+                decoration: InputDecoration(
+                  labelText: 'Address',
+                  hintText: 'http://host:port',
+                  errorText: errorText,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (_) {
+                  if (errorText != null) {
+                    setState(() {
+                      errorText = null;
+                    });
+                  }
+                },
+                onSubmitted: (String value) {
+                  final String? err = validate(value);
+                  if (err != null) {
+                    setState(() {
+                      errorText = err;
+                    });
+                    return;
+                  }
+                  Navigator.of(context).pop(true);
+                },
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final String? err = validate(controller.text);
+                if (err != null) {
+                  setState(() {
+                    errorText = err;
+                  });
+                  return;
+                }
+                Navigator.of(context).pop(true);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+          },
+        );
+      },
+    );
+
+    final String next = controller.text.trim();
+    controller.dispose();
+
+    if (saved != true || !mounted) {
+      return;
+    }
+
+    if (next == AppConfig.serverUrl) {
+      _showToast(
+        'No change to the server URL.',
+        title: 'Server URL',
+        tone: MochiToastTone.info,
+        icon: Icons.dns_rounded,
+      );
+      return;
+    }
+
+    try {
+      await widget.onServerUrlChanged(next);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorToast(error);
+    }
   }
 
   @override
@@ -269,6 +390,47 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  Future<void> _handleLogout() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Log out'),
+          content: const Text(
+            'Are you sure you want to log out? You\'ll need to sign in again to access your household.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: MochiPalette.peach,
+                foregroundColor: MochiPalette.ink,
+              ),
+              child: const Text('Log out'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    try {
+      await widget.onLogout();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showErrorToast(error);
+    }
+  }
+
   Future<void> _handleDeleteMember(Member member) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
@@ -413,7 +575,9 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 24),
+      padding: EdgeInsets.only(
+        bottom: MochiBottomNavBar.overlayPadding(context) + 24,
+      ),
       child: Column(
         children: <Widget>[
           Container(
@@ -434,6 +598,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   title: 'Server URL',
                   subtitle: AppConfig.serverUrl,
                   icon: Icons.cloud_done_rounded,
+                  onTap: _editServerUrl,
                 ),
                 const SizedBox(height: 10),
                 _SettingsInfoRow(
@@ -450,7 +615,7 @@ class _SettingsScreenState extends State<SettingsScreen>
                   title: 'Llama status',
                   subtitle: widget.petProvider.llamaOnline
                       ? 'Local llama server is reachable'
-                      : 'Gemini fallback will be used if chat is requested',
+                      : 'DeepSeek fallback will be used if chat is requested',
                   icon: widget.petProvider.llamaOnline
                       ? Icons.psychology_rounded
                       : Icons.psychology_alt_rounded,
@@ -588,10 +753,21 @@ class _SettingsScreenState extends State<SettingsScreen>
                   icon: Icons.info_outline_rounded,
                 ),
                 const SizedBox(height: 16),
+                const Divider(
+                  color: MochiPalette.ink,
+                  thickness: 2,
+                  indent: 0,
+                  endIndent: 0,
+                ),
+                const SizedBox(height: 16),
                 Align(
                   alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onLogout,
+                  child: FilledButton.icon(
+                    onPressed: _handleLogout,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: MochiPalette.peach,
+                      foregroundColor: MochiPalette.ink,
+                    ),
                     icon: const Icon(Icons.logout_rounded),
                     label: const Text('Log out'),
                   ),
@@ -778,15 +954,18 @@ class _SettingsInfoRow extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.icon,
+    this.onTap,
   });
 
   final String title;
   final String subtitle;
   final IconData icon;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final bool tappable = onTap != null;
+    final Widget content = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -807,7 +986,26 @@ class _SettingsInfoRow extends StatelessWidget {
               ],
             ),
           ),
+          if (tappable)
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: MochiPalette.ink,
+            ),
         ],
+      ),
+    );
+
+    if (!tappable) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: content,
       ),
     );
   }
