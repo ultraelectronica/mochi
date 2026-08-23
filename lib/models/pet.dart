@@ -24,10 +24,10 @@ extension PetStageData on PetStage {
 
 const Map<PetStage, int> petStageThresholds = <PetStage, int>{
   PetStage.egg: 0,
-  PetStage.hatchling: 100,
-  PetStage.pup: 300,
-  PetStage.companion: 700,
-  PetStage.wiseElder: 1500,
+  PetStage.hatchling: 250,
+  PetStage.pup: 750,
+  PetStage.companion: 1800,
+  PetStage.wiseElder: 4000,
 };
 
 PetStage petStageFromNumber(int stage) {
