@@ -610,7 +610,6 @@ class _HeaderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Member currentMember = memberProvider.currentMember;
     final String petName = petProvider.pet.name;
 
     return Container(
@@ -645,7 +644,7 @@ class _HeaderCard extends StatelessWidget {
                   ).textTheme.titleLarge?.copyWith(fontSize: 17),
                 ),
                 Text(
-                  'Your ${currentMember.name} \u00b7 on-device companion',
+                  'Your $petName \u00b7 on-device companion',
                   style: Theme.of(
                     context,
                   ).textTheme.bodyMedium?.copyWith(fontSize: 12),
