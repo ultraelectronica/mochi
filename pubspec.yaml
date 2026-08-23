@@ -1,5 +1,5 @@
 name: mochi
-description: "Family-shared AI companion pet—one creature for the household, with chat, moods, memories, and growth."
+description: "On-device AI companion pet that lives on your phone - chat with Mochi, track moods, memories, and growth. No server."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
@@ -36,10 +36,12 @@ dependencies:
   flutter_svg: ^2.0.10+1
   flutter_tts: ^4.2.2
   http: ^1.2.2
+  llama_cpp_dart: ^0.9.0-dev.12
+  path: ^1.9.1
+  path_provider: ^2.1.6
   shared_preferences: ^2.5.3
   speech_to_text: ^7.0.0
-  web_socket_channel: ^3.0.1
-
+  sqlite3: ^3.5.2
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   flutter_lints: ^6.0.0
