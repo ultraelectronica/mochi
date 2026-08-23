@@ -7,7 +7,7 @@ import '../models/mood.dart';
 import '../models/pet.dart';
 
 class PetSprite extends StatefulWidget {
-  const PetSprite({super.key, required this.pet, this.size = 220, this.onTap});
+  const PetSprite({super.key, required this.pet, this.size = 264, this.onTap});
 
   final Pet pet;
   final double size;

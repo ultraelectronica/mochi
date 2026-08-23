@@ -73,9 +73,14 @@ class MochiBottomNavBar extends StatelessWidget {
                     border: Border.all(color: MochiPalette.ink, width: 3),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     child: Row(
-                      children: List<Widget>.generate(_items.length, (int index) {
+                      children: List<Widget>.generate(_items.length, (
+                        int index,
+                      ) {
                         final _NavItemData item = _items[index];
                         return Expanded(
                           child: _NavButton(
@@ -189,22 +194,43 @@ class _SvgAssetIcon extends StatelessWidget {
     caseSensitive: false,
   );
 
+  static final Map<String, Uint8List?> _decodedCache = <String, Uint8List?>{};
+
+  static Future<Uint8List?> _load(String assetPath) async {
+    if (_decodedCache.containsKey(assetPath)) {
+      return _decodedCache[assetPath];
+    }
+    try {
+      final String svgText = await rootBundle.loadString(assetPath);
+      final RegExpMatch? match = _embeddedPngPattern.firstMatch(svgText);
+      return _decodedCache[assetPath] = match == null
+          ? null
+          : base64Decode(match.group(1)!);
+    } catch (_) {
+      return _decodedCache[assetPath] = null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String>(
-      future: rootBundle.loadString(assetPath),
-      builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
-        final String? svgText = snapshot.data;
-        if (svgText == null) {
+    final Uint8List? cached = _decodedCache[assetPath];
+    if (cached != null) {
+      return Image.memory(
+        cached,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.none,
+        gaplessPlayback: true,
+      );
+    }
+
+    return FutureBuilder<Uint8List?>(
+      future: _load(assetPath),
+      builder: (BuildContext context, AsyncSnapshot<Uint8List?> snapshot) {
+        final Uint8List? bytes = snapshot.data;
+        if (bytes == null) {
           return const SizedBox.shrink();
         }
 
-        final RegExpMatch? match = _embeddedPngPattern.firstMatch(svgText);
-        if (match == null) {
-          return const SizedBox.shrink();
-        }
-
-        final Uint8List bytes = base64Decode(match.group(1)!);
         return Image.memory(
           bytes,
           fit: BoxFit.contain,
