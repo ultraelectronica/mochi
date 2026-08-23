@@ -390,7 +390,29 @@ class MochiRepository {
 
   // ---- Taps ---------------------------------------------------------------
 
+  int tapCooldownRemainingSeconds({required int memberId}) {
+    final sqlite3.Row? last = _selectOne(
+      'SELECT created_at FROM pet_taps WHERE member_id = ? ORDER BY created_at DESC LIMIT 1',
+      <Object?>[memberId],
+    );
+    if (last == null) {
+      return 0;
+    }
+    final DateTime? lastAt = DateTime.tryParse(
+      last['created_at'] as String,
+    )?.toUtc();
+    if (lastAt == null) {
+      return 0;
+    }
+    final int elapsed = DateTime.now().toUtc().difference(lastAt).inSeconds;
+    final int remaining = GameConfig.tapCooldownSeconds - elapsed;
+    return remaining > 0 ? remaining : 0;
+  }
+
   int tapPet({required int memberId}) {
+    if (tapCooldownRemainingSeconds(memberId: memberId) > 0) {
+      return 0;
+    }
     final int xpAwarded = awardXp(memberId: memberId, amount: GameConfig.xpPerTap);
     _sql.execute(
       'INSERT INTO pet_taps (member_id, xp_awarded, created_at) VALUES (?, ?, ?)',
