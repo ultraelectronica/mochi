@@ -344,9 +344,14 @@ class PetProvider extends ChangeNotifier {
     return true;
   }
 
-  Future<void> tapPet(Member member) async {
-    _repo.tapPet(memberId: member.id);
+  int tapCooldownRemaining(int memberId) {
+    return _repo.tapCooldownRemainingSeconds(memberId: memberId);
+  }
+
+  Future<int> tapPet(Member member) async {
+    final int xpAwarded = _repo.tapPet(memberId: member.id);
     await _reloadLocal(includeChat: false);
+    return xpAwarded;
   }
 
   Future<void> addMemory({required String content, int weight = 1}) async {
