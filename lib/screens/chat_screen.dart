@@ -359,7 +359,7 @@ class _ChatScreenState extends State<ChatScreen>
         if (awaitingFirstToken) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: _TypingAvatar(mood: pet.mood, breath: _breath),
+            child: _TypingAvatar(pet: pet, breath: _breath),
           );
         }
         return Padding(
@@ -404,7 +404,7 @@ class _ExpandedChatHeader extends StatelessWidget {
       children: <Widget>[
         Row(
           children: <Widget>[
-            MochiPetAvatar(mood: pet.mood, size: 28),
+            MochiPetAvatar(pet: pet, size: 28),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -577,13 +577,14 @@ class _DateChip extends StatelessWidget {
 }
 
 class _TypingAvatar extends StatelessWidget {
-  const _TypingAvatar({required this.mood, required this.breath});
+  const _TypingAvatar({required this.pet, required this.breath});
 
-  final MochiMood mood;
+  final Pet pet;
   final Animation<double> breath;
 
   @override
   Widget build(BuildContext context) {
+    final MochiMood mood = pet.mood;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: <Widget>[
@@ -597,7 +598,7 @@ class _TypingAvatar extends StatelessWidget {
               child: Transform.scale(scale: pulse, child: child),
             );
           },
-          child: MochiPetAvatar(mood: mood, size: 32),
+          child: MochiPetAvatar(pet: pet, size: 32),
         ),
         const SizedBox(width: 8),
         Container(
@@ -670,7 +671,7 @@ class _EmptyChatIntro extends StatelessWidget {
             }),
           ),
           const SizedBox(height: 18),
-          MochiPetAvatar(mood: pet.mood, size: 72),
+          MochiPetAvatar(pet: pet, size: 72),
           const SizedBox(height: 14),
           Text(
             'Mochi is listening',
