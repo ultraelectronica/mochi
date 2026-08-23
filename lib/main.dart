@@ -1,30 +1,25 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'config/app_config.dart';
-import 'models/auth_session.dart';
 import 'models/member.dart';
 import 'models/mood.dart';
 import 'providers/member_provider.dart';
 import 'providers/pet_provider.dart';
-import 'screens/auth_screen.dart';
-import 'services/floating_mochi_service.dart';
-import 'services/api_service.dart';
-import 'services/session_store.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/mood_checkin_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/settings_screen.dart';
-import 'widgets/mood_checkin_sheet.dart';
-import 'widgets/create_member_dialog.dart';
+import 'services/floating_mochi_service.dart';
+import 'services/local_llm/model_manager.dart';
 import 'widgets/mochi_bottom_nav_bar.dart';
 import 'widgets/mochi_toast.dart';
+import 'widgets/mood_checkin_sheet.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ServerConfig.instance.load();
   runApp(const MochiApp());
 }
 
@@ -55,19 +50,16 @@ class MochiShell extends StatefulWidget {
   State<MochiShell> createState() => _MochiShellState();
 }
 
-class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
-  final ApiService _apiService = ApiService();
+class _MochiShellState extends State<MochiShell>
+    with WidgetsBindingObserver {
   late final PetProvider _petProvider;
   late final MemberProvider _memberProvider;
   final FloatingMochiService _floatingMochiService =
       const FloatingMochiService();
 
   int _selectedTabIndex = 1;
-  bool _checkingAuth = true;
-  bool _authBusy = false;
-  bool _bootstrapping = true;
+  bool _checkingLocal = true;
   String? _bootstrapError;
-  AuthSession? _session;
   bool _didAutoShowMoodSheetThisSession = false;
 
   @override
@@ -77,7 +69,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     _petProvider = PetProvider();
     _memberProvider = MemberProvider();
     _floatingMochiService.syncAppForegroundState(true);
-    unawaited(_restoreSession());
+    unawaited(_bootstrap());
   }
 
   @override
@@ -94,7 +86,10 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     switch (state) {
       case AppLifecycleState.resumed:
         _floatingMochiService.syncAppForegroundState(true);
-        unawaited(_refreshRemoteState(reconnectRealtime: true));
+        if (!_checkingLocal && _petProvider.hasPet) {
+          unawaited(_petProvider.brushUp());
+          unawaited(_memberProvider.loadMembers(setLoading: false));
+        }
         return;
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
@@ -106,89 +101,43 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _restoreSession() async {
-    await SessionStore.instance.load();
+  Future<void> _bootstrap() async {
+    try {
+      await _petProvider.initialize();
+      await _memberProvider.initialize();
 
-    if (!SessionStore.instance.hasSession) {
       if (!mounted) {
         return;
       }
-
       setState(() {
-        _checkingAuth = false;
-        _bootstrapping = false;
+        _checkingLocal = false;
+        _bootstrapError = null;
       });
+      _scheduleDailyMoodSheet();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _checkingLocal = false;
+        _bootstrapError = error.toString();
+      });
+    }
+  }
+
+  Future<void> _finishOnboarding() async {
+    await _petProvider.initialize();
+    await _memberProvider.initialize();
+    if (!_petProvider.hasPet || !_memberProvider.hasMembers) {
+      throw StateError('World setup did not create a profile.');
+    }
+    if (!mounted) {
       return;
     }
-
-    try {
-      final AuthSession session = await _apiService.fetchSession();
-      _applySession(session);
-      await _bootstrap();
-    } catch (error) {
-      await SessionStore.instance.clearSessionToken();
-      await _petProvider.clearSession();
-      _memberProvider.clearSession();
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _session = null;
-        _bootstrapError = null;
-        _checkingAuth = false;
-        _bootstrapping = false;
-      });
-
-      _showErrorToast(error, offlineOnly: true);
-    }
-  }
-
-  void _applySession(AuthSession session) {
-    _session = session;
-    _memberProvider.configureSession(session);
-  }
-
-  Future<void> _bootstrap() async {
-    if (mounted) {
-      setState(() {
-        _bootstrapping = true;
-        _bootstrapError = null;
-      });
-    }
-
-    try {
-      await Future.wait<void>(<Future<void>>[
-        _petProvider.initialize(),
-        _memberProvider.loadMembers(),
-      ]);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _bootstrapError = null;
-        _checkingAuth = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _bootstrapError = _primaryErrorMessage(error);
-      });
-
-      _showErrorToast(error, offlineOnly: true);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _bootstrapping = false;
-        });
-        _scheduleDailyMoodSheet();
-      }
-    }
+    setState(() {
+      _bootstrapError = null;
+    });
+    _scheduleDailyMoodSheet();
   }
 
   void _scheduleDailyMoodSheet() {
@@ -231,46 +180,6 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _refreshRemoteState({bool reconnectRealtime = false}) async {
-    try {
-      await Future.wait<void>(<Future<void>>[
-        _petProvider.refreshState(includeHealth: true, includeChat: true, force: true),
-        _memberProvider.loadMembers(setLoading: false, force: true),
-      ]);
-
-      if (reconnectRealtime) {
-        await _petProvider.reconnectRealtime();
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _bootstrapError = null;
-      });
-    } catch (error) {
-      if (!mounted || _petProvider.hasPet) {
-        return;
-      }
-
-      setState(() {
-        _bootstrapError = _primaryErrorMessage(error);
-      });
-
-      _showErrorToast(error, offlineOnly: true);
-    }
-  }
-
-  String _primaryErrorMessage(Object error) {
-    if (error is ApiException) {
-      return error.message;
-    }
-    return _petProvider.errorMessage ??
-        _memberProvider.errorMessage ??
-        error.toString().replaceFirst('Exception: ', '');
-  }
-
   void _showToast(
     String message, {
     String? title,
@@ -280,175 +189,26 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     MochiToast.show(title: title, message: message, tone: tone, icon: icon);
   }
 
-  void _showErrorToast(Object error, {bool offlineOnly = false}) {
-    if (error is ApiException && error.isOffline) {
-      _showToast(
-        'Start the Mochi server at ${AppConfig.serverUrl}, then try again.',
-        title: 'Mochi server offline',
-        tone: MochiToastTone.warning,
-        icon: Icons.cloud_off_rounded,
-      );
-      return;
-    }
-
-    if (offlineOnly) {
-      return;
-    }
-
-    _showToast(
-      _primaryErrorMessage(error),
-      title: 'Something went sideways',
-      tone: MochiToastTone.error,
-      icon: Icons.sync_problem_rounded,
-    );
-  }
-
-  Future<void> _handleAuthenticatedSession(AuthSession session) async {
-    await SessionStore.instance.setSessionToken(session.sessionToken);
-    _applySession(session);
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _selectedTabIndex = 1;
-      _checkingAuth = false;
-      _bootstrapError = null;
-    });
-
-    await _bootstrap();
-  }
-
-  Future<void> _runAuthAction(Future<AuthSession> Function() action) async {
-    if (_authBusy) {
-      return;
-    }
-
-    setState(() {
-      _authBusy = true;
-      _bootstrapError = null;
-    });
-
-    try {
-      final AuthSession session = await action();
-      await _handleAuthenticatedSession(session);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _bootstrapError = null;
-      });
-
-      _showErrorToast(error);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _authBusy = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _handleBootstrap(BootstrapDraft draft) async {
-    await _runAuthAction(
-      () => _apiService.bootstrap(
-        householdName: draft.householdName,
-        adminName: draft.adminName,
-        username: draft.username,
-        password: draft.password,
-        color: draft.color,
-      ),
-    );
-  }
-
-  Future<void> _handleLogin(LoginDraft draft) async {
-    await _runAuthAction(
-      () => _apiService.login(
-        householdCode: draft.householdCode,
-        username: draft.username,
-        password: draft.password,
-      ),
-    );
-  }
-
-  Future<void> _handleInvite(InviteDraft draft) async {
-    await _runAuthAction(
-      () => _apiService.acceptInvite(
-        inviteCode: draft.inviteCode,
-        password: draft.password,
-      ),
-    );
-  }
-
-  Future<void> _handleLogout() async {
-    try {
-      await _apiService.logout();
-    } catch (_) {}
-
-    await SessionStore.instance.clearSessionToken();
-    await _petProvider.clearSession();
-    _memberProvider.clearSession();
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _session = null;
-      _bootstrapError = null;
-      _selectedTabIndex = 1;
-      _didAutoShowMoodSheetThisSession = false;
-      _checkingAuth = false;
-      _bootstrapping = false;
-    });
-  }
-
-  Future<void> _handleServerUrlChanged(String url) async {
-    await ServerConfig.instance.setUrl(url);
-
-    try {
-      await _apiService.logout();
-    } catch (_) {}
-
-    await SessionStore.instance.clearSessionToken();
-    await _petProvider.clearSession();
-    _memberProvider.clearSession();
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _session = null;
-      _bootstrapError = null;
-      _selectedTabIndex = 1;
-      _didAutoShowMoodSheetThisSession = false;
-      _checkingAuth = false;
-      _bootstrapping = false;
-    });
-
-    _showToast(
-      'Server URL updated. Sign in to continue.',
-      title: 'Server changed',
-      tone: MochiToastTone.success,
-      icon: Icons.dns_rounded,
-    );
-  }
-
-  Future<void> _handleSendMessage(String text, {String inputType = 'text'}) async {
+  Future<void> _handleSendMessage(
+    String text, {
+    String inputType = 'text',
+  }) async {
     final Member member = _memberProvider.currentMember;
 
     try {
-      await _petProvider.sendMessage(member: member, text: text, inputType: inputType);
-      await _memberProvider.loadMembers(
-        setLoading: false,
-        preferredMemberId: member.id,
+      await _petProvider.sendMessage(
+        member: member,
+        text: text,
+        inputType: inputType,
       );
     } catch (error) {
       if (mounted) {
-        _showErrorToast(error);
+        _showToast(
+          error.toString(),
+          title: 'A tiny hiccup',
+          tone: MochiToastTone.error,
+          icon: Icons.sync_problem_rounded,
+        );
       }
     }
   }
@@ -457,10 +217,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     final Member member = _memberProvider.currentMember;
 
     try {
-      final bool applied = await _petProvider.checkIn(
-        member: member,
-        mood: mood,
-      );
+      final bool applied = await _petProvider.checkIn(member: member, mood: mood);
       if (!applied) {
         if (mounted) {
           _showToast(
@@ -472,15 +229,15 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         }
         return false;
       }
-
-      await _memberProvider.loadMembers(
-        setLoading: false,
-        preferredMemberId: member.id,
-      );
       return true;
     } catch (error) {
       if (mounted) {
-        _showErrorToast(error);
+        _showToast(
+          error.toString(),
+          title: 'A tiny hiccup',
+          tone: MochiToastTone.error,
+          icon: Icons.sync_problem_rounded,
+        );
       }
       return false;
     }
@@ -491,116 +248,20 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
 
     try {
       await _petProvider.tapPet(member);
-      await _memberProvider.loadMembers(
-        setLoading: false,
-        preferredMemberId: member.id,
-      );
     } catch (error) {
       if (mounted) {
-        _showErrorToast(error);
+        _showToast(
+          error.toString(),
+          title: 'A tiny hiccup',
+          tone: MochiToastTone.error,
+          icon: Icons.sync_problem_rounded,
+        );
       }
     }
   }
 
   Future<void> _handleRefreshHistory() async {
-    try {
-      await _refreshRemoteState();
-    } catch (error) {
-      if (mounted) {
-        _showErrorToast(error);
-      }
-    }
-  }
-
-  Future<void> _openCreateMemberDialog() async {
-    if (!_memberProvider.isAdmin) {
-      _showToast(
-        'Only the household admin can create accounts.',
-        title: 'Admin only',
-        tone: MochiToastTone.warning,
-        icon: Icons.admin_panel_settings_rounded,
-      );
-      return;
-    }
-
-    final MemberDraft? draft = await showDialog<MemberDraft>(
-      context: context,
-      builder: (BuildContext context) => const CreateMemberDialog(),
-    );
-
-    if (draft == null || !mounted) {
-      return;
-    }
-
-    try {
-      final CreatedMemberInvite created = await _memberProvider.createMember(
-        name: draft.name,
-        username: draft.username,
-        color: draft.color,
-      );
-      if (_petProvider.hasPet) {
-        await _petProvider.refreshState(
-          includeHealth: false,
-          includeChat: false,
-        );
-      }
-      if (mounted) {
-        await _showInviteCodeDialog(created);
-      }
-    } catch (error) {
-      if (mounted) {
-        _showErrorToast(error);
-      }
-    }
-  }
-
-  Future<void> _showInviteCodeDialog(CreatedMemberInvite created) async {
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('${created.member.name} account created'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Username: ${created.member.username}'),
-              const SizedBox(height: 8),
-              Text('Invite code: ${created.inviteCode}'),
-              const SizedBox(height: 8),
-              Text('Household code: ${_session?.household.code ?? ''}'),
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(
-                  ClipboardData(
-                    text:
-                        'Invite code: ${created.inviteCode}\nHousehold code: ${_session?.household.code ?? ''}\nUsername: ${created.member.username}',
-                  ),
-                );
-                if (!context.mounted) {
-                  return;
-                }
-                Navigator.of(context).pop();
-                _showToast(
-                  'Invite details copied.',
-                  title: 'Copied',
-                  tone: MochiToastTone.success,
-                  icon: Icons.content_copy_rounded,
-                );
-              },
-              child: const Text('Copy'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Done'),
-            ),
-          ],
-        );
-      },
-    );
+    await _petProvider.refreshState(force: true);
   }
 
   void _openFullscreenChat() {
@@ -623,7 +284,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[_petProvider, _memberProvider]),
       builder: (BuildContext context, Widget? child) {
-        if (_checkingAuth) {
+        if (_checkingLocal) {
           return Scaffold(
             body: Stack(
               children: <Widget>[
@@ -635,9 +296,9 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
                       child: const Padding(
                         padding: EdgeInsets.all(16),
                         child: _StartupCard(
-                          title: 'Checking session',
+                          title: 'Waking up Mochi',
                           subtitle:
-                              'Looking for your saved household account before Mochi syncs the rest of the app.',
+                              'Loading the local room, memories, and mood from this device.',
                         ),
                       ),
                     ),
@@ -648,42 +309,11 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
           );
         }
 
-        if (_session == null) {
-          return AuthScreen(
-            isBusy: _authBusy,
-            errorMessage: null,
-            onBootstrap: _handleBootstrap,
-            onLogin: _handleLogin,
-            onAcceptInvite: _handleInvite,
-          );
+        if (!_petProvider.hasPet || !_memberProvider.hasMembers) {
+          return OnboardingScreen(onComplete: _finishOnboarding);
         }
 
-        if (_bootstrapping) {
-          return Scaffold(
-            body: Stack(
-              children: <Widget>[
-                const Positioned.fill(child: _PixelBackdrop()),
-                SafeArea(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 520),
-                      child: const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: _StartupCard(
-                          title: 'Syncing Mochi',
-                          subtitle:
-                              'Loading the shared pet, family members, and recent moments from the server.',
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!_petProvider.hasPet) {
+        if (_bootstrapError != null) {
           return Scaffold(
             body: Stack(
               children: <Widget>[
@@ -695,43 +325,16 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: _ActionCard(
-                          title: 'Mochi could not connect',
-                          subtitle:
-                              _bootstrapError ??
-                              'Check the server URL, make sure the backend is running, then try again.',
-                          actionLabel: 'Retry sync',
-                          onPressed: _bootstrap,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!_memberProvider.hasMembers) {
-          return Scaffold(
-            body: Stack(
-              children: <Widget>[
-                const Positioned.fill(child: _PixelBackdrop()),
-                SafeArea(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 560),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: _ActionCard(
-                          title: 'Create the first family member',
-                          subtitle:
-                              'Mochi is online, but nobody has joined the shared room yet. Add the first profile to start chatting and checking in.',
-                          actionLabel: _memberProvider.isCreating
-                              ? 'Adding member...'
-                              : 'Add first member',
-                          onPressed: _memberProvider.isCreating
-                              ? null
-                              : _openCreateMemberDialog,
+                          title: 'Mochi could not start',
+                          subtitle: _bootstrapError!,
+                          actionLabel: 'Retry',
+                          onPressed: () {
+                            setState(() {
+                              _checkingLocal = true;
+                              _bootstrapError = null;
+                            });
+                            unawaited(_bootstrap());
+                          },
                         ),
                       ),
                     ),
@@ -763,12 +366,8 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
             onOpenChat: () => setState(() => _selectedTabIndex = 0),
           ),
           SettingsScreen(
-            session: _session!,
             petProvider: _petProvider,
             memberProvider: _memberProvider,
-            onCreateMember: _openCreateMemberDialog,
-            onLogout: _handleLogout,
-            onServerUrlChanged: _handleServerUrlChanged,
           ),
         ];
 
@@ -787,10 +386,8 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
                           child: _HeaderCard(
-                            session: _session!,
                             memberProvider: _memberProvider,
                             petProvider: _petProvider,
-                            onCreateMember: _openCreateMemberDialog,
                           ),
                         ),
                         Expanded(
@@ -854,7 +451,7 @@ class _StartupCard extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2.4),
               ),
               SizedBox(width: 12),
-              Expanded(child: Text('Talking to the shared Mochi server...')),
+              Expanded(child: Text('Reading this device...')),
             ],
           ),
         ],
@@ -949,393 +546,84 @@ class _FullscreenChatScreen extends StatelessWidget {
   }
 }
 
-class _HeaderCard extends StatefulWidget {
+class _HeaderCard extends StatelessWidget {
   const _HeaderCard({
-    required this.session,
     required this.memberProvider,
     required this.petProvider,
-    required this.onCreateMember,
   });
 
-  final AuthSession session;
   final MemberProvider memberProvider;
   final PetProvider petProvider;
-  final VoidCallback onCreateMember;
-
-  @override
-  State<_HeaderCard> createState() => _HeaderCardState();
-}
-
-class _HeaderCardState extends State<_HeaderCard> {
-  bool _collapsed = false;
-  double _dragDelta = 0;
-
-  void _setCollapsed(bool value) {
-    if (_collapsed == value) {
-      return;
-    }
-    setState(() {
-      _collapsed = value;
-    });
-  }
-
-  void _onDragStart(DragStartDetails details) {
-    _dragDelta = 0;
-  }
-
-  void _onDragUpdate(DragUpdateDetails details) {
-    _dragDelta += details.delta.dy;
-    if (!_collapsed && _dragDelta < -24) {
-      _setCollapsed(true);
-      _dragDelta = 0;
-    } else if (_collapsed && _dragDelta > 24) {
-      _setCollapsed(false);
-      _dragDelta = 0;
-    }
-  }
-
-  void _onDragEnd(DragEndDetails details) {
-    final double velocity = details.primaryVelocity ?? 0;
-    if (velocity < -180) {
-      _setCollapsed(true);
-    } else if (velocity > 180) {
-      _setCollapsed(false);
-    }
-    _dragDelta = 0;
-  }
 
   @override
   Widget build(BuildContext context) {
-    final Member currentMember = widget.memberProvider.currentMember;
+    final Member currentMember = memberProvider.currentMember;
+    final String petName = petProvider.pet.name;
 
-    return GestureDetector(
-      onVerticalDragStart: _onDragStart,
-      onVerticalDragUpdate: _onDragUpdate,
-      onVerticalDragEnd: _onDragEnd,
-      child: AnimatedSize(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        child: Container(
-          padding: EdgeInsets.fromLTRB(14, _collapsed ? 8 : 10, 14, 8),
-          decoration: pixelCardDecoration(MochiPalette.cloudBlue),
-          child: _collapsed
-              ? _CollapsedHeader(
-                  currentMember: currentMember,
-                  memberCount: widget.memberProvider.members.length,
-                  householdCode: widget.session.household.code,
-                  onExpand: () => _setCollapsed(false),
-                )
-              : _ExpandedHeader(
-                  session: widget.session,
-                  memberProvider: widget.memberProvider,
-                  petProvider: widget.petProvider,
-                  onCreateMember: widget.onCreateMember,
-                  onCollapse: () => _setCollapsed(true),
-                ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ExpandedHeader extends StatelessWidget {
-  const _ExpandedHeader({
-    required this.session,
-    required this.memberProvider,
-    required this.petProvider,
-    required this.onCreateMember,
-    required this.onCollapse,
-  });
-
-  final AuthSession session;
-  final MemberProvider memberProvider;
-  final PetProvider petProvider;
-  final VoidCallback onCreateMember;
-  final VoidCallback onCollapse;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: MochiPalette.yellow,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: MochiPalette.ink, width: 2),
-              ),
-              child: const Icon(
-                Icons.pets_rounded,
-                size: 20,
-                color: MochiPalette.ink,
-              ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: pixelCardDecoration(MochiPalette.cloudBlue),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: MochiPalette.yellow,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: MochiPalette.ink, width: 2),
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    AppConfig.appTitle,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontSize: 17,
-                        ),
-                  ),
-                  Text(
-                    '${session.household.name} • ${session.household.code}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                        ),
-                  ),
-                ],
-              ),
+            child: const Icon(
+              Icons.pets_rounded,
+              size: 20,
+              color: MochiPalette.ink,
             ),
-            _InfoBadge(
-              label: petProvider.serverOnline ? 'Online' : 'Fallback',
-              color: petProvider.serverOnline
-                  ? MochiPalette.mint
-                  : MochiPalette.peach,
-              icon: petProvider.serverOnline
-                  ? Icons.cloud_done_rounded
-                  : Icons.cloud_off_rounded,
-            ),
-            const SizedBox(width: 6),
-            if (memberProvider.isAdmin)
-              InkWell(
-                onTap: onCreateMember,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: MochiPalette.ink, width: 2),
-                  ),
-                  child: const Icon(
-                    Icons.person_add_alt_1_rounded,
-                    size: 18,
-                    color: MochiPalette.ink,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: List<Widget>.generate(memberProvider.members.length, (
-              int index,
-            ) {
-              final Member member = memberProvider.members[index];
-              final bool selected =
-                  member.id == memberProvider.currentMember.id;
-              final MochiMood? mood = petProvider.moodForMember(member.id);
-              return AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 7,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? member.color.withValues(alpha: 0.28)
-                      : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: MochiPalette.ink, width: 2),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Container(
-                      width: 26,
-                      height: 26,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: member.color,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: MochiPalette.ink, width: 1.5),
-                      ),
-                      child: Text(
-                        member.initials,
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              fontSize: 11,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            Text(
-                              member.name,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge
-                                  ?.copyWith(fontSize: 12),
-                            ),
-                            if (member.isAdmin) ...<Widget>[
-                              const SizedBox(width: 4),
-                              const Icon(
-                                Icons.admin_panel_settings_rounded,
-                                size: 14,
-                              ),
-                            ],
-                          ],
-                        ),
-                        Text(
-                          mood?.label ??
-                              (member.invitePending
-                                  ? 'Invite pending'
-                                  : 'Ready'),
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontSize: 11,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            }),
           ),
-        ),
-        const SizedBox(height: 8),
-        _DragHandle(
-          label: 'Drag up to hide household roster',
-          icon: Icons.keyboard_arrow_up_rounded,
-          onTap: onCollapse,
-        ),
-      ],
-    );
-  }
-}
-
-class _CollapsedHeader extends StatelessWidget {
-  const _CollapsedHeader({
-    required this.currentMember,
-    required this.memberCount,
-    required this.householdCode,
-    required this.onExpand,
-  });
-
-  final Member currentMember;
-  final int memberCount;
-  final String householdCode;
-  final VoidCallback onExpand;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: MochiPalette.yellow,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: MochiPalette.ink, width: 1.5),
-              ),
-              child: const Icon(
-                Icons.pets_rounded,
-                size: 16,
-                color: MochiPalette.ink,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    'Mochi',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontSize: 14,
-                        ),
-                  ),
-                  Text(
-                    '$memberCount accounts • ${currentMember.name} • $householdCode',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        _DragHandle(
-          label: 'Drag down to show household roster',
-          icon: Icons.keyboard_arrow_down_rounded,
-          onTap: onExpand,
-        ),
-      ],
-    );
-  }
-}
-
-class _DragHandle extends StatelessWidget {
-  const _DragHandle({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: MochiPalette.ink.withValues(alpha: 0.24),
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Row(
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Icon(icon, size: 14, color: MochiPalette.ink),
-                const SizedBox(width: 4),
                 Text(
-                  label,
+                  '$petName \u00b7 ${petProvider.pet.mood.label}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontSize: 17,
+                      ),
+                ),
+                Text(
+                  'Your ${currentMember.name} \u00b7 on-device companion',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontSize: 11,
+                        fontSize: 12,
                       ),
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          AnimatedBuilder(
+            animation: ModelManager.instance,
+            builder: (BuildContext context, Widget? child) {
+              final bool downloading = ModelManager.instance.state.isActive;
+              return _InfoBadge(
+                label: petProvider.llamaOnline
+                    ? 'AI ready'
+                    : downloading
+                    ? 'Downloading brain'
+                    : 'AI offline',
+                color: petProvider.llamaOnline
+                    ? MochiPalette.mint
+                    : downloading
+                        ? MochiPalette.yellow
+                        : MochiPalette.peach,
+                icon: petProvider.llamaOnline
+                    ? Icons.psychology_rounded
+                    : downloading
+                        ? Icons.download_rounded
+                        : Icons.psychology_alt_rounded,
+              );
+            },
+          ),
+        ],
       ),
     );
   }
