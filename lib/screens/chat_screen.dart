@@ -212,8 +212,7 @@ class _ChatScreenState extends State<ChatScreen>
   Widget build(BuildContext context) {
     final Pet pet = widget.petProvider.pet;
     final Member currentMember = widget.memberProvider.currentMember;
-    final int visibleEntryCount = widget.petProvider.chatEntries.length +
-        (widget.petProvider.replyPending ? 1 : 0);
+    final int visibleEntryCount = _itemCount();
 
     if (visibleEntryCount != _lastRenderedEntryCount) {
       _lastRenderedEntryCount = visibleEntryCount;
@@ -332,9 +331,13 @@ class _ChatScreenState extends State<ChatScreen>
           controller: _controller,
           isListening: _isListening,
           micEnabled: _stt.isAvailable,
+          thinkEnabled: widget.petProvider.thinkEnabled,
           replyPending: widget.petProvider.replyPending,
           onSend: _send,
           onToggleMic: _toggleMic,
+          onToggleThink: () => widget.petProvider.setThinkEnabled(
+            !widget.petProvider.thinkEnabled,
+          ),
         ),
         SizedBox(
           height: widget.isFullscreen
@@ -346,10 +349,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   int _itemCount() {
-    final int entries = widget.petProvider.chatEntries.length;
-    final int extras = widget.petProvider.replyPending ? 1 : 0;
-    final int dateChips = _dateChipCount();
-    return entries + extras + dateChips;
+    final List<ChatEntry> entries = widget.petProvider.chatEntries;
+    // The streaming Mochi entry already lives in chatEntries; no extra slot.
+    return entries.length + _dateChipCount();
   }
 
   int _dateChipCount() {
@@ -397,6 +399,19 @@ class _ChatScreenState extends State<ChatScreen>
             (prev!.isPet != curr.isPet) ||
             (prev.author != curr.author) ||
             _isNewDay(prev.createdAt, curr.createdAt);
+        // While Mochi is still waiting for the first token, the pending
+        // stream entry is empty — show the typing avatar instead of a
+        // hollow bubble. Once tokens arrive it becomes a normal bubble.
+        final bool awaitingFirstToken = replyPending &&
+            entryIndex == entries.length - 1 &&
+            curr.isPet &&
+            curr.text.isEmpty;
+        if (awaitingFirstToken) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _TypingAvatar(mood: pet.mood, breath: _breath),
+          );
+        }
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: ChatBubble(
@@ -410,12 +425,6 @@ class _ChatScreenState extends State<ChatScreen>
       }
       i += 1;
       entryIndex += 1;
-    }
-    if (replyPending) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: _TypingAvatar(mood: pet.mood, breath: _breath),
-      );
     }
     return const SizedBox.shrink();
   }
@@ -594,9 +603,9 @@ class _StatusDots extends StatelessWidget {
       children: <Widget>[
         _StatusDot(
           color: serverOnline ? MochiPalette.mint : MochiPalette.peach,
-          tooltip: serverOnline ? 'Live history' : 'Offline',
+          tooltip: serverOnline ? 'Chats save on this device' : 'Unable to save',
           icon: serverOnline
-              ? Icons.sync_rounded
+              ? Icons.phone_android_rounded
               : Icons.sync_problem_rounded,
         ),
         const SizedBox(width: 4),
@@ -853,7 +862,7 @@ class _EmptyChatIntro extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Pull down to refresh if messages were added elsewhere.',
+            'Everything stays on this phone.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontSize: 12,
@@ -871,17 +880,21 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.isListening,
     required this.micEnabled,
+    required this.thinkEnabled,
     required this.replyPending,
     required this.onSend,
     required this.onToggleMic,
+    required this.onToggleThink,
   });
 
   final TextEditingController controller;
   final bool isListening;
   final bool micEnabled;
+  final bool thinkEnabled;
   final bool replyPending;
   final Future<void> Function({String inputType}) onSend;
   final VoidCallback onToggleMic;
+  final VoidCallback onToggleThink;
 
   @override
   Widget build(BuildContext context) {
@@ -908,6 +921,20 @@ class _Composer extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              IconButton(
+                onPressed: onToggleThink,
+                icon: Icon(
+                  thinkEnabled
+                      ? Icons.psychology_rounded
+                      : Icons.psychology_alt_outlined,
+                ),
+                color: thinkEnabled ? MochiPalette.sky : null,
+                tooltip: thinkEnabled
+                    ? 'Deep think on \u00b7 Mochi ponders before replying'
+                    : 'Deep think off',
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
               IconButton(
                 onPressed: micEnabled ? onToggleMic : null,
                 icon: Icon(
