@@ -3,7 +3,7 @@
 ## Tech Stack Diagram
 This diagram shows the full technology stack of Mochi, organized by system layers. The frontend uses Flutter for UI, animations, and input/output features. The backend runs on Node.js with Express, handling API logic, mood processing, and scheduled tasks.
 
-The AI layer uses TinyLlama via llama.cpp for local inference, with a Gemini API fallback when unavailable. SQLite stores persistent data such as pet state, interactions, and memories.
+*Historical note:* earlier versions ran TinyLlama via llama.cpp on a local server with a Gemini fallback. The current build is fully on-device: LFM2.5 GGUF via llama.cpp inside the Flutter app, with SQLite stored locally.
 
 Infrastructure tools like Termux, Cloudflare Tunnel, and Termux:Boot allow the system to run continuously on a mobile device and remain accessible online.
 
@@ -34,11 +34,11 @@ These relationships allow both shared and personal interactions to influence the
 ## Architectural Design Diagram
 This diagram shows how components communicate in real time.
 
-Multiple Flutter apps connect via HTTPS to a Cloudflare Tunnel, which routes requests to the server running on the Samsung Galaxy Note 8.
+*Historical note (pre-on-device):* multiple Flutter apps connected via HTTPS through a Cloudflare Tunnel to a server on a home device.
 
-Node.js processes requests, retrieves data from SQLite, builds AI prompts, and sends them to TinyLlama via llama.cpp. Responses are returned to users and broadcast through WebSocket.
+*Historical note:* Node.js used to process requests and broadcast replies over WebSocket; the app now does all of this locally, with no live sync.
 
-If the local server is unavailable, the system falls back to the Gemini API.
+*Historical note:* the app no longer uses a cloud fallback — replies come from the downloaded model or are not produced at all.
 
 
 ## Screen Navigation Map

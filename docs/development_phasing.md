@@ -1,5 +1,11 @@
 # Mochi — development phasing
 
+> **Status (2026-08):** Mochi has moved to a **fully on-device architecture**.
+> The Node/Express server (`server/`) has been retired; the AI runs via
+> llama.cpp inside the Flutter app and the database is a local SQLite file.
+> Sections below describing the client/server split, auth, and household
+> isolation are historical context only.
+
 This document ties together:
 
 1. **Development life-cycle (SDLC) stages** — where the project sits in a classic software lifecycle.
