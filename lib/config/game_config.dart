@@ -5,6 +5,7 @@ class GameConfig {
   static const int xpPerChat = 10;
   static const int xpPerCheckin = 5;
   static const int xpPerTap = 2;
+  static const int tapCooldownSeconds = 10;
   static const double moodDecayHours = 12;
 
   static const int maxMemoriesPerMember = 12;
