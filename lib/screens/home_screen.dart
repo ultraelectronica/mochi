@@ -24,7 +24,7 @@ class HomeScreen extends StatelessWidget {
 
   final PetProvider petProvider;
   final MemberProvider memberProvider;
-  final VoidCallback onPetTap;
+  final Future<int> Function() onPetTap;
   final VoidCallback onOpenMoodCheckInSheet;
   final VoidCallback onOpenMoodCheckInFullScreen;
   final VoidCallback onOpenChat;
@@ -107,7 +107,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class _HeroPanel extends StatelessWidget {
+class _HeroPanel extends StatefulWidget {
   const _HeroPanel({
     required this.pet,
     required this.petProvider,
@@ -121,8 +121,37 @@ class _HeroPanel extends StatelessWidget {
   final PetProvider petProvider;
   final Member currentMember;
   final int totalMembers;
-  final VoidCallback onPetTap;
+  final Future<int> Function() onPetTap;
   final VoidCallback onOpenChat;
+
+  @override
+  State<_HeroPanel> createState() => _HeroPanelState();
+}
+
+class _HeroPanelState extends State<_HeroPanel> {
+  final List<_XpBurst> _bursts = <_XpBurst>[];
+  int _burstIdCounter = 0;
+
+  Future<void> _handleTap() async {
+    final int xp = await widget.onPetTap();
+    if (!mounted) {
+      return;
+    }
+    if (xp > 0) {
+      final int id = _burstIdCounter++;
+      setState(() {
+        _bursts.add(_XpBurst(id: id, xp: xp));
+      });
+      Future<void>.delayed(const Duration(milliseconds: 950), () {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _bursts.removeWhere((_XpBurst burst) => burst.id == id);
+        });
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -134,21 +163,21 @@ class _HeroPanel extends StatelessWidget {
           runSpacing: 8,
           children: <Widget>[
             _Badge(
-              label: pet.stage.label,
+              label: widget.pet.stage.label,
               color: MochiPalette.yellow,
               icon: Icons.timeline_rounded,
             ),
             _Badge(
-              label: pet.mood.label,
-              color: pet.mood.color.withValues(alpha: 0.28),
-              icon: pet.mood.icon,
+              label: widget.pet.mood.label,
+              color: widget.pet.mood.color.withValues(alpha: 0.28),
+              icon: widget.pet.mood.icon,
             ),
             _Badge(
-              label: petProvider.llamaOnline ? 'On-device AI' : 'Local mode',
-              color: petProvider.llamaOnline
+              label: widget.petProvider.llamaOnline ? 'On-device AI' : 'Local mode',
+              color: widget.petProvider.llamaOnline
                   ? MochiPalette.mint
                   : MochiPalette.peach,
-              icon: petProvider.llamaOnline
+              icon: widget.petProvider.llamaOnline
                   ? Icons.psychology_rounded
                   : Icons.phone_android_rounded,
             ),
@@ -161,16 +190,16 @@ class _HeroPanel extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          petProvider.greetingFor(currentMember.name),
+          widget.petProvider.greetingFor(widget.currentMember.name),
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 10),
         XpBar(
-          value: pet.stageProgress,
+          value: widget.pet.stageProgress,
           color: MochiPalette.sky,
-          label: pet.nextStage == null
-              ? 'Max growth reached - ${pet.xp} XP total'
-              : '${pet.xp} XP of ${pet.nextStageXp} XP toward ${pet.nextStage!.label}',
+          label: widget.pet.nextStage == null
+              ? 'Max growth reached - ${widget.pet.xp} XP total'
+              : '${widget.pet.xp} XP of ${widget.pet.nextStageXp} XP toward ${widget.pet.nextStage!.label}',
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -180,28 +209,42 @@ class _HeroPanel extends StatelessWidget {
             const _MiniStatCard(label: 'Motion', value: 'Smooth'),
             _MiniStatCard(
               label: 'Affinity',
-              value: '${currentMember.affection}%',
+              value: '${widget.currentMember.affection}%',
             ),
-            _MiniStatCard(label: 'Family', value: '$totalMembers members'),
+            _MiniStatCard(label: 'Family', value: '${widget.totalMembers} members'),
           ],
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
-          onPressed: onOpenChat,
+          onPressed: widget.onOpenChat,
           icon: const Icon(Icons.chat_bubble_rounded),
           label: const Text('Open Chat'),
         ),
       ],
     );
 
-    final Widget petBlock = Column(
+    final Widget petBlock = Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
       children: <Widget>[
-        PetSprite(pet: pet, size: 240, onTap: onPetTap),
-        const SizedBox(height: 6),
-        Text(
-          'Tap Mochi for a tiny reaction burst.',
-          style: Theme.of(context).textTheme.bodyMedium,
+        Column(
+          children: <Widget>[
+            PetSprite(pet: widget.pet, size: 240, onTap: _handleTap),
+            const SizedBox(height: 6),
+            Text(
+              'Tap Mochi for a tiny reaction burst.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
         ),
+        for (final _XpBurst burst in _bursts)
+          Positioned(
+            top: 24,
+            child: _FloatingXp(
+              key: ValueKey<int>(burst.id),
+              xp: burst.xp,
+            ),
+          ),
       ],
     );
 
@@ -230,6 +273,96 @@ class _HeroPanel extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _XpBurst {
+  const _XpBurst({required this.id, required this.xp});
+
+  final int id;
+  final int xp;
+}
+
+class _FloatingXp extends StatefulWidget {
+  const _FloatingXp({super.key, required this.xp});
+
+  final int xp;
+
+  @override
+  State<_FloatingXp> createState() => _FloatingXpState();
+}
+
+class _FloatingXpState extends State<_FloatingXp>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 850),
+  )..forward();
+
+  late final Animation<double> _rise = Tween<double>(begin: 0, end: -56).animate(
+    CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+  );
+
+  late final Animation<double> _fade = Tween<double>(begin: 1, end: 0).animate(
+    CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.35, 1, curve: Curves.easeInCubic),
+    ),
+  );
+
+  late final Animation<double> _scale = Tween<double>(begin: 0.85, end: 1.1).animate(
+    CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (BuildContext context, Widget? child) {
+        return Transform.translate(
+          offset: Offset(0, _rise.value),
+          child: Opacity(
+            opacity: _fade.value,
+            child: Transform.scale(scale: _scale.value, child: child),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: MochiPalette.yellow,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: MochiPalette.ink, width: 2),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: MochiPalette.ink.withValues(alpha: 0.14),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.auto_awesome_rounded, size: 14, color: MochiPalette.ink),
+            const SizedBox(width: 4),
+            Text(
+              '+${widget.xp} XP',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: MochiPalette.ink,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
