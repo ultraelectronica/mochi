@@ -144,13 +144,13 @@ class _HeroPanel extends StatelessWidget {
               icon: pet.mood.icon,
             ),
             _Badge(
-              label: petProvider.serverOnline ? 'Live sync' : 'Gemini fallback',
-              color: petProvider.serverOnline
+              label: petProvider.llamaOnline ? 'On-device AI' : 'Local mode',
+              color: petProvider.llamaOnline
                   ? MochiPalette.mint
                   : MochiPalette.peach,
-              icon: petProvider.serverOnline
-                  ? Icons.sync_rounded
-                  : Icons.offline_bolt_rounded,
+              icon: petProvider.llamaOnline
+                  ? Icons.psychology_rounded
+                  : Icons.phone_android_rounded,
             ),
           ],
         ),
