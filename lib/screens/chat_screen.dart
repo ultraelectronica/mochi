@@ -180,9 +180,8 @@ class _ChatScreenState extends State<ChatScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (BuildContext context) => _ChatSessionsSheet(
-        petProvider: widget.petProvider,
-      ),
+      builder: (BuildContext context) =>
+          _ChatSessionsSheet(petProvider: widget.petProvider),
     );
   }
 
@@ -198,8 +197,18 @@ class _ChatScreenState extends State<ChatScreen>
       return 'Yesterday';
     }
     const List<String> months = <String>[
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[when.month - 1]} ${when.day}';
   }
@@ -229,12 +238,7 @@ class _ChatScreenState extends State<ChatScreen>
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
             child: Container(
-              padding: EdgeInsets.fromLTRB(
-                12,
-                _headerCollapsed ? 6 : 8,
-                12,
-                6,
-              ),
+              padding: EdgeInsets.fromLTRB(12, _headerCollapsed ? 6 : 8, 12, 6),
               decoration: pixelCardDecoration(pet.mood.color),
               child: _headerCollapsed
                   ? _CollapsedChatHeader(
@@ -260,32 +264,32 @@ class _ChatScreenState extends State<ChatScreen>
         ),
         const SizedBox(height: 6),
         Expanded(
-          child: Container(
-            decoration: pixelCardDecoration(pet.mood.tint),
-            child: RefreshIndicator(
-              onRefresh: _refreshHistory,
-              child: widget.petProvider.chatEntries.isEmpty &&
-                      !widget.petProvider.replyPending
-                  ? ListView(
-                      controller: _scrollController,
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-                      children: <Widget>[
-                        _EmptyChatIntro(
-                          pet: pet,
-                          breath: _breath,
-                        ),
-                      ],
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                      itemCount: _itemCount(),
-                      itemBuilder: (BuildContext context, int index) {
-                        return _buildListItem(index, currentMember, pet);
-                      },
-                    ),
+          child: RepaintBoundary(
+            child: Container(
+              decoration: pixelCardDecoration(pet.mood.tint),
+              child: RefreshIndicator(
+                onRefresh: _refreshHistory,
+                child:
+                    widget.petProvider.chatEntries.isEmpty &&
+                        !widget.petProvider.replyPending
+                    ? ListView(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                        children: <Widget>[
+                          _EmptyChatIntro(pet: pet, breath: _breath),
+                        ],
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                        itemCount: _itemCount(),
+                        itemBuilder: (BuildContext context, int index) {
+                          return _buildListItem(index, currentMember, pet);
+                        },
+                      ),
+              ),
             ),
           ),
         ),
@@ -395,14 +399,16 @@ class _ChatScreenState extends State<ChatScreen>
         final ChatEntry curr = entries[entryIndex];
         final bool isFirst = entryIndex == 0;
         final ChatEntry? prev = isFirst ? null : entries[entryIndex - 1];
-        final bool showMeta = isFirst ||
+        final bool showMeta =
+            isFirst ||
             (prev!.isPet != curr.isPet) ||
             (prev.author != curr.author) ||
             _isNewDay(prev.createdAt, curr.createdAt);
         // While Mochi is still waiting for the first token, the pending
         // stream entry is empty — show the typing avatar instead of a
         // hollow bubble. Once tokens arrive it becomes a normal bubble.
-        final bool awaitingFirstToken = replyPending &&
+        final bool awaitingFirstToken =
+            replyPending &&
             entryIndex == entries.length - 1 &&
             curr.isPet &&
             curr.text.isEmpty;
@@ -465,23 +471,20 @@ class _ExpandedChatHeader extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     'Chat with Mochi',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontSize: 14,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(fontSize: 14),
                   ),
                   Text(
                     '${pet.mood.label} tone \u00b7 short warm replies',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                   ),
                 ],
               ),
             ),
-            _StatusDots(
-              serverOnline: serverOnline,
-              ttsEnabled: ttsEnabled,
-            ),
+            _StatusDots(serverOnline: serverOnline, ttsEnabled: ttsEnabled),
             const SizedBox(width: 4),
             _IconAction(
               icon: Icons.history_rounded,
@@ -501,10 +504,7 @@ class _ExpandedChatHeader extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 4),
-        _DragHandle(
-          icon: Icons.keyboard_arrow_up_rounded,
-          onTap: onCollapse,
-        ),
+        _DragHandle(icon: Icons.keyboard_arrow_up_rounded, onTap: onCollapse),
       ],
     );
   }
@@ -545,23 +545,20 @@ class _CollapsedChatHeader extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     'Chat with Mochi',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontSize: 14,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(fontSize: 14),
                   ),
                   Text(
                     '${pet.mood.label} tone ready',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontSize: 12,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                   ),
                 ],
               ),
             ),
-            _StatusDots(
-              serverOnline: serverOnline,
-              ttsEnabled: ttsEnabled,
-            ),
+            _StatusDots(serverOnline: serverOnline, ttsEnabled: ttsEnabled),
             const SizedBox(width: 4),
             _IconAction(
               icon: Icons.history_rounded,
@@ -581,10 +578,7 @@ class _CollapsedChatHeader extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 4),
-        _DragHandle(
-          icon: Icons.keyboard_arrow_down_rounded,
-          onTap: onExpand,
-        ),
+        _DragHandle(icon: Icons.keyboard_arrow_down_rounded, onTap: onExpand),
       ],
     );
   }
@@ -603,7 +597,9 @@ class _StatusDots extends StatelessWidget {
       children: <Widget>[
         _StatusDot(
           color: serverOnline ? MochiPalette.mint : MochiPalette.peach,
-          tooltip: serverOnline ? 'Chats save on this device' : 'Unable to save',
+          tooltip: serverOnline
+              ? 'Chats save on this device'
+              : 'Unable to save',
           icon: serverOnline
               ? Icons.phone_android_rounded
               : Icons.sync_problem_rounded,
@@ -612,9 +608,7 @@ class _StatusDots extends StatelessWidget {
         _StatusDot(
           color: ttsEnabled ? MochiPalette.lightPink : MochiPalette.cloudBlue,
           tooltip: ttsEnabled ? 'Voice on' : 'Voice muted',
-          icon: ttsEnabled
-              ? Icons.volume_up_rounded
-              : Icons.volume_off_rounded,
+          icon: ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
         ),
       ],
     );
@@ -711,7 +705,11 @@ class _DragHandle extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 1),
-            Icon(icon, size: 14, color: MochiPalette.ink.withValues(alpha: 0.6)),
+            Icon(
+              icon,
+              size: 14,
+              color: MochiPalette.ink.withValues(alpha: 0.6),
+            ),
           ],
         ),
       ),
@@ -739,9 +737,9 @@ class _DateChip extends StatelessWidget {
           child: Text(
             label,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontSize: 11,
-                  color: MochiPalette.ink.withValues(alpha: 0.7),
-                ),
+              fontSize: 11,
+              color: MochiPalette.ink.withValues(alpha: 0.7),
+            ),
           ),
         ),
       ),
@@ -788,8 +786,8 @@ class _TypingAvatar extends StatelessWidget {
           child: Text(
             '${mood.label.toLowerCase()} \u00b7 thinking',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: MochiPalette.ink.withValues(alpha: 0.7),
-                ),
+              color: MochiPalette.ink.withValues(alpha: 0.7),
+            ),
           ),
         ),
       ],
@@ -824,7 +822,8 @@ class _EmptyChatIntro extends StatelessWidget {
                 child: AnimatedBuilder(
                   animation: breath,
                   builder: (BuildContext context, Widget? child) {
-                    final double phase = (breath.value + i / swatch.length) % 1.0;
+                    final double phase =
+                        (breath.value + i / swatch.length) % 1.0;
                     final double opacity = 0.55 + (0.45 * phase);
                     return Opacity(opacity: opacity, child: child);
                   },
@@ -834,10 +833,7 @@ class _EmptyChatIntro extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: swatch[i],
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: MochiPalette.ink,
-                        width: 1.5,
-                      ),
+                      border: Border.all(color: MochiPalette.ink, width: 1.5),
                     ),
                   ),
                 ),
@@ -865,9 +861,9 @@ class _EmptyChatIntro extends StatelessWidget {
             'Everything stays on this phone.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontSize: 12,
-                  color: MochiPalette.ink.withValues(alpha: 0.55),
-                ),
+              fontSize: 12,
+              color: MochiPalette.ink.withValues(alpha: 0.55),
+            ),
           ),
         ],
       ),
@@ -954,7 +950,11 @@ class _Composer extends StatelessWidget {
                     horizontal: 14,
                     vertical: 10,
                   ),
-                  textStyle: const TextStyle(fontSize: 13, fontFamily: 'Pixelify Sans', fontWeight: FontWeight.w700),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontFamily: 'Pixelify Sans',
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
@@ -1020,9 +1020,9 @@ class _ListeningPillState extends State<_ListeningPill>
             Text(
               'Listening \u00b7 tap mic to stop',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontSize: 11,
-                    color: MochiPalette.ink,
-                  ),
+                fontSize: 11,
+                color: MochiPalette.ink,
+              ),
             ),
           ],
         ),
@@ -1234,9 +1234,9 @@ class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
                                     const SizedBox(height: 10),
                                     Text(
                                       'No saved chats yet',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodyMedium,
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
@@ -1247,8 +1247,9 @@ class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
                                           .bodyMedium
                                           ?.copyWith(
                                             fontSize: 12,
-                                            color: MochiPalette.ink
-                                                .withValues(alpha: 0.55),
+                                            color: MochiPalette.ink.withValues(
+                                              alpha: 0.55,
+                                            ),
                                           ),
                                     ),
                                   ],
@@ -1262,11 +1263,9 @@ class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
                               physics: const AlwaysScrollableScrollPhysics(),
                               shrinkWrap: true,
                               itemCount: sessions.length,
-                              separatorBuilder: (
-                                BuildContext context,
-                                int index,
-                              ) =>
-                                  const SizedBox(height: 8),
+                              separatorBuilder:
+                                  (BuildContext context, int index) =>
+                                      const SizedBox(height: 8),
                               itemBuilder: (BuildContext context, int index) {
                                 final ChatSession session = sessions[index];
                                 return _SessionTile(
@@ -1310,9 +1309,7 @@ class _SessionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: isActive
-          ? MochiPalette.mint.withValues(alpha: 0.6)
-          : Colors.white,
+      color: isActive ? MochiPalette.mint.withValues(alpha: 0.6) : Colors.white,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         onTap: onSelect,
@@ -1353,9 +1350,9 @@ class _SessionTile extends StatelessWidget {
                       session.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            fontSize: 13,
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelLarge?.copyWith(fontSize: 13),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1365,9 +1362,9 @@ class _SessionTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontSize: 12,
-                            color: MochiPalette.ink.withValues(alpha: 0.6),
-                          ),
+                        fontSize: 12,
+                        color: MochiPalette.ink.withValues(alpha: 0.6),
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -1377,9 +1374,9 @@ class _SessionTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontSize: 11,
-                            color: MochiPalette.ink.withValues(alpha: 0.5),
-                          ),
+                        fontSize: 11,
+                        color: MochiPalette.ink.withValues(alpha: 0.5),
+                      ),
                     ),
                   ],
                 ),

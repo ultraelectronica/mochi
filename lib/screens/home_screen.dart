@@ -196,7 +196,7 @@ class _HeroPanel extends StatelessWidget {
 
     final Widget petBlock = Column(
       children: <Widget>[
-        PetSprite(pet: pet, size: 200, onTap: onPetTap),
+        PetSprite(pet: pet, size: 240, onTap: onPetTap),
         const SizedBox(height: 6),
         Text(
           'Tap Mochi for a tiny reaction burst.',
