@@ -3,32 +3,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/game_config.dart';
+import '../db/mochi_db.dart';
+import '../db/mochi_repository.dart';
 import '../models/chat_session.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
-import '../services/api_service.dart';
+import '../services/local_llm/llm_service.dart';
+import '../services/local_llm/local_models.dart';
+import '../services/local_llm/model_manager.dart';
+import '../services/local_llm/prompt_builder.dart';
 import '../services/tts_service.dart';
-import '../services/websocket_service.dart';
 
 class PetProvider extends ChangeNotifier {
-  PetProvider({ApiService? apiService, WebSocketService? webSocketService, TtsService? ttsService})
-    : _apiService = apiService ?? ApiService(),
-      _webSocketService = webSocketService ?? WebSocketService(),
-      _ttsService = ttsService ?? TtsService();
+  PetProvider({TtsService? ttsService}) : _ttsService = ttsService ?? TtsService();
 
-  final ApiService _apiService;
-  final WebSocketService _webSocketService;
   final TtsService _ttsService;
 
-  StreamSubscription<Map<String, dynamic>>? _webSocketSubscription;
-
-  Future<void>? _activeRefresh;
-  DateTime _lastRefreshedAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-  static const Duration _minRefreshInterval = Duration(seconds: 5);
+  late MochiRepository _repo;
 
   Pet? _pet;
+  Member? _profile;
   List<ChatEntry> _chatEntries = <ChatEntry>[];
   List<ChatSession> _sessions = <ChatSession>[];
   int? _activeSessionId;
@@ -36,20 +32,21 @@ class PetProvider extends ChangeNotifier {
   List<MemorySnippet> _memories = <MemorySnippet>[];
   Map<int, MochiMood> _memberCheckIns = <int, MochiMood>{};
 
-  bool _serverOnline = false;
   bool _llamaOnline = false;
   bool _ttsEnabled = true;
+  bool _thinkEnabled = false;
   bool _notificationsEnabled = true;
   bool _replyPending = false;
   bool _isLoading = true;
   String? _errorMessage;
 
   static const String _ttsPrefKey = 'mochi_tts_enabled';
+  static const String _thinkPrefKey = 'mochi_think_enabled';
 
   Pet get pet => _pet!;
+  Member get profile => _profile!;
   List<ChatEntry> get chatEntries => List<ChatEntry>.unmodifiable(_chatEntries);
-  List<ChatSession> get sessions =>
-      List<ChatSession>.unmodifiable(_sessions);
+  List<ChatSession> get sessions => List<ChatSession>.unmodifiable(_sessions);
   int? get activeSessionId => _activeSessionId;
   bool get isActiveSessionNew => _activeSessionId == null;
   List<ActivityEntry> get feedEntries =>
@@ -58,9 +55,10 @@ class PetProvider extends ChangeNotifier {
       List<MemorySnippet>.unmodifiable(_memories);
   Map<int, MochiMood> get memberCheckIns =>
       Map<int, MochiMood>.unmodifiable(_memberCheckIns);
-  bool get serverOnline => _serverOnline;
+  bool get serverOnline => _pet != null;
   bool get llamaOnline => _llamaOnline;
   bool get ttsEnabled => _ttsEnabled;
+  bool get thinkEnabled => _thinkEnabled;
   bool get notificationsEnabled => _notificationsEnabled;
   bool get replyPending => _replyPending;
   bool get isLoading => _isLoading;
@@ -95,99 +93,81 @@ class PetProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       _ttsEnabled = prefs.getBool(_ttsPrefKey) ?? true;
+      _thinkEnabled = prefs.getBool(_thinkPrefKey) ?? false;
       notifyListeners();
     } catch (_) {}
 
     try {
-      await refreshState(includeHealth: true, includeChat: true);
-      await connectRealtime();
+      final MochiDb db = await MochiDb.instance();
+      _repo = MochiRepository(db);
+      _repo.pruneStaleMemories();
+      await _reloadLocal();
+      unawaited(_warmModel());
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<void> connectRealtime() async {
-    await _webSocketSubscription?.cancel();
-    await _webSocketService.connect();
-    _webSocketSubscription = _webSocketService.events.listen((
-      Map<String, dynamic> event,
-    ) {
-      unawaited(_handleRealtimeEvent(event));
-    });
+  Future<void> _warmModel() async {
+    try {
+      final bool installed =
+          await ModelManager.instance.selectedInstalled();
+      if (!installed) {
+        return;
+      }
+      await LlmService.instance.ensureLoaded(ModelManager.instance.selected);
+      _llamaOnline = LlmService.instance.isReady;
+      notifyListeners();
+    } catch (error) {
+      debugPrint('[PetProvider] model warm-up failed: $error');
+      _llamaOnline = false;
+      notifyListeners();
+    }
   }
 
-  Future<void> reconnectRealtime() async {
-    await connectRealtime();
-  }
-
+  /// Local state refresh — cheap DB re-reads, no network.
   Future<void> refreshState({
     bool includeHealth = true,
     bool includeChat = true,
     bool force = false,
   }) async {
-    if (_activeRefresh != null) {
-      return _activeRefresh!;
-    }
-
-    if (!force &&
-        DateTime.now().difference(_lastRefreshedAt) < _minRefreshInterval) {
-      return;
-    }
-
-    _activeRefresh = _doRefresh(
-      includeHealth: includeHealth,
-      includeChat: includeChat,
-    );
-    try {
-      await _activeRefresh!;
-    } finally {
-      _activeRefresh = null;
-      _lastRefreshedAt = DateTime.now();
-    }
+    unawaited(_reloadLocal(includeChat: includeChat));
+    await Future<void>.delayed(Duration.zero);
   }
 
-  Future<void> _doRefresh({
-    bool includeHealth = true,
-    bool includeChat = true,
-  }) async {
+  Future<void> _reloadLocal({bool includeChat = true}) async {
+    _pet = _repo.getPet();
+    _profile = _repo.getProfile();
+    _memories = _repo.listMemories();
+    _feedEntries = _repo.feed();
+    _memberCheckIns = _repo.todayMoodMap();
+
+    if (includeChat) {
+      if (_activeSessionId != null) {
+        _chatEntries = _repo.chatHistory(sessionId: _activeSessionId!);
+      }
+      _sessions = _repo.listSessions();
+    }
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> connectRealtime() async {}
+
+  Future<void> reconnectRealtime() async {}
+
+  /// Called on app resume: recompute mood (inactivity decay), prune stale
+  /// memories, and re-sync everything from the local DB.
+  Future<void> brushUp() async {
     try {
-      if (includeHealth) {
-        final ({bool serverOnline, bool llamaOnline}) health = await _apiService
-            .fetchHealth();
-        _serverOnline = health.serverOnline;
-        _llamaOnline = health.llamaOnline;
-      }
-
-      final List<Future<Object>> requests = <Future<Object>>[
-        _apiService.fetchPet(),
-        _apiService.fetchMemories(),
-        _apiService.fetchFeed(),
-        _apiService.fetchTodayMoodMap(),
-      ];
-
-      if (includeChat) {
-        requests.add(_apiService.fetchChatHistory(sessionId: _activeSessionId));
-        requests.add(_apiService.fetchChatSessions());
-      }
-
-      final List<Object> results = await Future.wait<Object>(requests);
-
-      _pet = results[0] as Pet;
-      _memories = results[1] as List<MemorySnippet>;
-      _feedEntries = results[2] as List<ActivityEntry>;
-      _memberCheckIns = results[3] as Map<int, MochiMood>;
-      if (includeChat) {
-        _chatEntries = results[4] as List<ChatEntry>;
-        _sessions = results[5] as List<ChatSession>;
-      }
-      _serverOnline = true;
-      _errorMessage = null;
-    } catch (error) {
-      _applyError(error);
-      rethrow;
-    } finally {
+      _repo.pruneStaleMemories();
+      _repo.recalculateMood();
+      await _reloadLocal();
+      _llamaOnline = LlmService.instance.isReady;
       notifyListeners();
+    } catch (error) {
+      debugPrint('[PetProvider] brushUp failed: $error');
     }
   }
 
@@ -207,42 +187,106 @@ class PetProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
+    final ChatEntry streamEntry = ChatEntry.local(
+      author: 'Mochi',
+      text: '',
+      isPet: true,
+    );
+    _chatEntries = <ChatEntry>[..._chatEntries, streamEntry];
+    notifyListeners();
+
     try {
-      final ({String reply, Pet pet, int? sessionId}) result =
-          await _apiService.sendMessage(
-        memberId: member.id,
+      LocalModel model = ModelManager.instance.selected;
+      if (!await ModelManager.instance.isInstalled(model)) {
+        throw const _LocalModelMissingException();
+      }
+
+      if (!LlmService.instance.isReady) {
+        await LlmService.instance.ensureLoaded(model);
+      }
+      _llamaOnline = LlmService.instance.isReady;
+      notifyListeners();
+
+      final Pet pet = _repo.getPet()!;
+      final List<String> memoryContents = _repo.memoriesForPrompt();
+      final List<LlmChatMessage> messages = PromptBuilder.buildMessages(
+        memberName: member.name,
         text: text,
-        sessionId: _activeSessionId,
-        inputType: inputType,
+        mood: pet.mood,
+        memories: memoryContents,
+        think: _thinkEnabled,
       );
 
-      _pet = result.pet;
-      if (result.sessionId != null) {
-        _activeSessionId = result.sessionId;
+      String reply = '';
+      void streamToken(String token) {
+        reply += token;
+        if (_chatEntries.isNotEmpty) {
+          _chatEntries = <ChatEntry>[
+            ..._chatEntries.sublist(0, _chatEntries.length - 1),
+            ChatEntry(
+              id: null,
+              author: 'Mochi',
+              text: reply,
+              isPet: true,
+              timestamp: streamEntry.timestamp,
+              createdAt: streamEntry.createdAt,
+            ),
+          ];
+          notifyListeners();
+        }
+      }
+
+      final String? rawReply = await LlmService.instance.reply(
+        messages: messages,
+        userText: text,
+        think: _thinkEnabled,
+        onToken: streamToken,
+      );
+      reply = rawReply ?? pet.mood.reaction;
+
+      final int sessionId =
+          _repo.resolveSession(memberId: member.id, requestedSessionId: _activeSessionId);
+      final int xpAwarded =
+          _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerChat);
+
+      _repo.insertInteraction(
+        memberId: member.id,
+        sessionId: sessionId,
+        inputText: text,
+        responseText: reply,
+        inputType: inputType,
+        xpAwarded: xpAwarded,
+      );
+      _repo.deriveSessionTitle(sessionId, text);
+      _repo.touchSession(sessionId);
+      _repo.upsertMemory(memberId: member.id, content: text);
+      _repo.checkStagePromotion();
+      _repo.recalculateMood();
+
+      _activeSessionId = sessionId;
+      if (_chatEntries.isNotEmpty) {
+        _chatEntries = _chatEntries.sublist(0, _chatEntries.length - 1);
       }
       _chatEntries = <ChatEntry>[
         ..._chatEntries,
-        ChatEntry.local(author: 'Mochi', text: result.reply, isPet: true),
+        ChatEntry.local(author: 'Mochi', text: reply, isPet: true),
       ];
-      _serverOnline = true;
       _errorMessage = null;
-
-      if (_ttsEnabled && result.reply.isNotEmpty) {
-        unawaited(_ttsService.speak(result.reply));
+      await _reloadLocal();
+      if (_ttsEnabled && reply.isNotEmpty) {
+        unawaited(_ttsService.speak(reply));
       }
-
-      try {
-        final List<Object> results = await Future.wait<Object>([
-          _apiService.fetchChatHistory(sessionId: _activeSessionId),
-          _apiService.fetchChatSessions(),
-        ]);
-        _chatEntries = results[0] as List<ChatEntry>;
-        _sessions = results[1] as List<ChatSession>;
-      } catch (_) {
-        notifyListeners();
+    } on _LocalModelMissingException {
+      if (_chatEntries.isNotEmpty) {
+        _chatEntries = _chatEntries.sublist(0, _chatEntries.length - 1);
       }
+      _errorMessage =
+          "Mochi's brain is not downloaded. Open Settings to add it.";
     } catch (error) {
-      _chatEntries = List<ChatEntry>.from(_chatEntries)..remove(optimistic);
+      _chatEntries = <ChatEntry>[
+        for (final ChatEntry entry in _chatEntries)
+          if (entry != optimistic && !identical(entry, streamEntry)) entry,
+      ];
       _applyError(error);
       rethrow;
     } finally {
@@ -266,23 +310,13 @@ class PetProvider extends ChangeNotifier {
     _chatEntries = <ChatEntry>[];
     _errorMessage = null;
     notifyListeners();
-
-    try {
-      _chatEntries = await _apiService.fetchChatHistory(sessionId: sessionId);
-      _serverOnline = true;
-      _errorMessage = null;
-    } catch (error) {
-      _applyError(error);
-      rethrow;
-    } finally {
-      notifyListeners();
-    }
+    _chatEntries = _repo.chatHistory(sessionId: sessionId);
+    notifyListeners();
   }
 
   Future<void> deleteSession(int sessionId) async {
-    await _apiService.deleteChatSession(sessionId);
-    _sessions = List<ChatSession>.from(_sessions)
-      ..removeWhere((ChatSession session) => session.id == sessionId);
+    _repo.deleteSession(sessionId);
+    _sessions = _repo.listSessions();
     if (_activeSessionId == sessionId) {
       _activeSessionId = null;
       _chatEntries = <ChatEntry>[];
@@ -291,69 +325,33 @@ class PetProvider extends ChangeNotifier {
   }
 
   Future<void> loadSessions() async {
-    try {
-      _sessions = await _apiService.fetchChatSessions();
-      notifyListeners();
-    } catch (error) {
-      _applyError(error);
-      rethrow;
-    }
+    _sessions = _repo.listSessions();
+    notifyListeners();
   }
 
   Future<bool> checkIn({
     required Member member,
     required MochiMood mood,
   }) async {
-    try {
-      final result = await _apiService.checkInMood(
-        memberId: member.id,
-        mood: mood,
-      );
-      _pet = result.pet;
-      _serverOnline = true;
-      _errorMessage = null;
-
-      try {
-        await refreshState(includeHealth: false, includeChat: false);
-      } catch (_) {
-        notifyListeners();
-      }
-      return true;
-    } on ApiException catch (error) {
-      if (error.statusCode == 409) {
-        _errorMessage = null;
-        _serverOnline = true;
-        return false;
-      }
-      _applyError(error);
-      rethrow;
-    } catch (error) {
-      _applyError(error);
-      rethrow;
+    if (_repo.memberCheckedInToday(member.id)) {
+      return false;
     }
+    _repo.recordMoodCheckIn(memberId: member.id, mood: mood.name);
+    _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerCheckin);
+    _repo.checkStagePromotion();
+    _repo.recalculateMood();
+    await _reloadLocal(includeChat: false);
+    return true;
   }
 
   Future<void> tapPet(Member member) async {
-    try {
-      final result = await _apiService.tapPet(memberId: member.id);
-      _pet = result.pet;
-      _serverOnline = true;
-      _errorMessage = null;
-
-      try {
-        await refreshState(includeHealth: false, includeChat: false);
-      } catch (_) {
-        notifyListeners();
-      }
-    } catch (error) {
-      _applyError(error);
-      rethrow;
-    }
+    _repo.tapPet(memberId: member.id);
+    await _reloadLocal(includeChat: false);
   }
 
   Future<void> addMemory({required String content, int weight = 1}) async {
-    await _apiService.createMemory(content: content, weight: weight);
-    await refreshState(includeHealth: false, includeChat: false);
+    _repo.addMemory(memberId: _profile!.id, content: content, weight: weight);
+    await _reloadLocal(includeChat: false);
   }
 
   Future<void> updateMemory({
@@ -361,21 +359,19 @@ class PetProvider extends ChangeNotifier {
     String? content,
     int? weight,
   }) async {
-    await _apiService.updateMemory(id: id, content: content, weight: weight);
-    await refreshState(includeHealth: false, includeChat: false);
+    _repo.updateMemory(id: id, content: content, weight: weight);
+    await _reloadLocal(includeChat: false);
   }
 
   Future<void> removeMemory(int id) async {
-    await _apiService.deleteMemory(id);
-    _memories = List<MemorySnippet>.from(_memories)..removeWhere((m) => m.id == id);
+    _repo.deleteMemory(id);
+    _memories = _repo.listMemories();
     notifyListeners();
   }
 
   Future<void> clearSession() async {
-    await _webSocketSubscription?.cancel();
-    await _webSocketService.disconnect();
-    _webSocketSubscription = null;
     _pet = null;
+    _profile = null;
     _chatEntries = <ChatEntry>[];
     _sessions = <ChatSession>[];
     _activeSessionId = null;
@@ -402,6 +398,17 @@ class PetProvider extends ChangeNotifier {
     });
   }
 
+  void setThinkEnabled(bool value) {
+    if (_thinkEnabled == value) {
+      return;
+    }
+    _thinkEnabled = value;
+    notifyListeners();
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool(_thinkPrefKey, value);
+    });
+  }
+
   void setNotificationsEnabled(bool value) {
     if (_notificationsEnabled == value) {
       return;
@@ -414,41 +421,22 @@ class PetProvider extends ChangeNotifier {
     if (_errorMessage == null) {
       return;
     }
-
     _errorMessage = null;
     notifyListeners();
   }
 
-  Future<void> _handleRealtimeEvent(Map<String, dynamic> event) async {
-    final Map<String, dynamic>? petJson = event['pet'] as Map<String, dynamic>?;
-    if (petJson != null) {
-      _pet = Pet.fromJson(petJson);
-      notifyListeners();
-    }
-
-    try {
-      await refreshState(includeHealth: false, includeChat: !_replyPending);
-    } catch (_) {
-      // Keep the last known state if the follow-up refresh fails.
-    }
-  }
-
   void _applyError(Object error) {
-    if (error is ApiException) {
-      _errorMessage = error.message;
-      _serverOnline = error.statusCode != null;
-      return;
-    }
-
-    _errorMessage = 'Failed to sync with the Mochi server';
-    _serverOnline = false;
+    _errorMessage = 'Failed to save this conversation on this device';
+    debugPrint('[PetProvider] $error');
   }
 
   @override
   void dispose() {
-    unawaited(_webSocketSubscription?.cancel());
-    unawaited(_webSocketService.dispose());
     unawaited(_ttsService.dispose());
     super.dispose();
   }
+}
+
+class _LocalModelMissingException implements Exception {
+  const _LocalModelMissingException();
 }
