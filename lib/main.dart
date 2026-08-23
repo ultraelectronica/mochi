@@ -245,11 +245,23 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _handlePetTap() async {
+  Future<int> _handlePetTap() async {
     final Member member = _memberProvider.currentMember;
 
     try {
-      await _petProvider.tapPet(member);
+      final int xpAwarded = await _petProvider.tapPet(member);
+      if (xpAwarded == 0 && mounted) {
+        final int remaining = _petProvider.tapCooldownRemaining(member.id);
+        _showToast(
+          remaining > 0
+              ? 'Mochi is still giggling! Try again in ${remaining}s.'
+              : 'Mochi needs a tiny breath before the next pat.',
+          title: 'Too quick!',
+          tone: MochiToastTone.info,
+          icon: Icons.hourglass_bottom_rounded,
+        );
+      }
+      return xpAwarded;
     } catch (error) {
       if (mounted) {
         _showToast(
@@ -259,6 +271,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
           icon: Icons.sync_problem_rounded,
         );
       }
+      return 0;
     }
   }
 
@@ -358,9 +371,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
           HomeScreen(
             petProvider: _petProvider,
             memberProvider: _memberProvider,
-            onPetTap: () {
-              unawaited(_handlePetTap());
-            },
+            onPetTap: _handlePetTap,
             onOpenMoodCheckInSheet: () {
               unawaited(_showMoodCheckInSheet());
             },
