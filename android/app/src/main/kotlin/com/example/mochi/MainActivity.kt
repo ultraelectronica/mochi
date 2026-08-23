@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.Display
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -36,6 +37,11 @@ class MainActivity : FlutterActivity() {
         if (!isAppInForeground && isFloatingMochiEnabled() && canDrawOverlays()) {
             startFloatingMochi()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        requestHighestRefreshRate()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -303,6 +309,32 @@ class MainActivity : FlutterActivity() {
                 data = Uri.parse("package:$packageName")
             },
         )
+    }
+
+    // Android loves picking a power-friendly 60Hz mode; ask for the fastest
+    // one at the current resolution so Flutter vsync runs at 120Hz on capable
+    // panels. Re-applied on resume because the system resets it sometimes.
+    private fun requestHighestRefreshRate() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return
+        }
+
+        runCatching {
+            @Suppress("DEPRECATION")
+            val display: Display = windowManager.defaultDisplay ?: return
+            val current = display.mode ?: return
+            val bestMode = display.supportedModes
+                .filter { mode ->
+                    mode.physicalWidth == current.physicalWidth &&
+                        mode.physicalHeight == current.physicalHeight &&
+                        mode.refreshRate > current.refreshRate + 0.1f
+                }
+                .maxByOrNull { it.refreshRate } ?: return
+
+            window.attributes = window.attributes.apply {
+                preferredDisplayModeId = bestMode.modeId
+            }
+        }
     }
 
     private fun hasPermission(permission: String): Boolean {
