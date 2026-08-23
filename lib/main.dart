@@ -50,8 +50,7 @@ class MochiShell extends StatefulWidget {
   State<MochiShell> createState() => _MochiShellState();
 }
 
-class _MochiShellState extends State<MochiShell>
-    with WidgetsBindingObserver {
+class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
   late final PetProvider _petProvider;
   late final MemberProvider _memberProvider;
   final FloatingMochiService _floatingMochiService =
@@ -217,7 +216,10 @@ class _MochiShellState extends State<MochiShell>
     final Member member = _memberProvider.currentMember;
 
     try {
-      final bool applied = await _petProvider.checkIn(member: member, mood: mood);
+      final bool applied = await _petProvider.checkIn(
+        member: member,
+        mood: mood,
+      );
       if (!applied) {
         if (mounted) {
           _showToast(
@@ -371,54 +373,105 @@ class _MochiShellState extends State<MochiShell>
           ),
         ];
 
-        return Scaffold(
-          extendBody: true,
-          body: Stack(
-            children: <Widget>[
-              const Positioned.fill(child: _PixelBackdrop()),
-              SafeArea(
-                bottom: false,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1180),
-                    child: Column(
-                      children: <Widget>[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-                          child: _HeaderCard(
-                            memberProvider: _memberProvider,
-                            petProvider: _petProvider,
-                          ),
-                        ),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                            child: IndexedStack(
-                              index: _selectedTabIndex,
-                              children: tabs,
+        // The backdrop lives outside the Scaffold so the keyboard inset
+        // animation resizes only the body — the backdrop never relayouts or
+        // repaints while typing.
+        return Stack(
+          children: <Widget>[
+            const Positioned.fill(
+              child: RepaintBoundary(child: _PixelBackdrop()),
+            ),
+            Scaffold(
+              backgroundColor: Colors.transparent,
+              extendBody: true,
+              body: Stack(
+                children: <Widget>[
+                  SafeArea(
+                    bottom: false,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1180),
+                        child: Column(
+                          children: <Widget>[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                16,
+                                16,
+                                10,
+                              ),
+                              child: _HeaderCard(
+                                memberProvider: _memberProvider,
+                                petProvider: _petProvider,
+                              ),
                             ),
-                          ),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  0,
+                                  16,
+                                  0,
+                                ),
+                                child: IndexedStack(
+                                  index: _selectedTabIndex,
+                                  children: <Widget>[
+                                    for (int i = 0; i < tabs.length; i++)
+                                      TickerMode(
+                                        enabled: i == _selectedTabIndex,
+                                        child: tabs[i],
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _AutoHideBottomNav(
+                      child: MochiBottomNavBar(
+                        selectedIndex: _selectedTabIndex,
+                        onSelected: (int index) {
+                          setState(() => _selectedTabIndex = index);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: MochiBottomNavBar(
-                  selectedIndex: _selectedTabIndex,
-                  onSelected: (int index) {
-                    setState(() => _selectedTabIndex = index);
-                  },
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         );
       },
+    );
+  }
+}
+
+// Slides the nav pill offscreen while the keyboard is up: frees screen space
+// for the composer and keeps the BackdropFilter blur out of the keyboard
+// inset animation. Only this subtree rebuilds per inset frame.
+class _AutoHideBottomNav extends StatelessWidget {
+  const _AutoHideBottomNav({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    return IgnorePointer(
+      ignoring: keyboardOpen,
+      child: AnimatedSlide(
+        offset: keyboardOpen ? const Offset(0, 1.4) : Offset.zero,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        child: child,
+      ),
     );
   }
 }
@@ -516,11 +569,14 @@ class _FullscreenChatScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: Listenable.merge(<Listenable>[petProvider, memberProvider]),
       builder: (BuildContext context, Widget? child) {
-        return Scaffold(
-          body: Stack(
-            children: <Widget>[
-              const Positioned.fill(child: _PixelBackdrop()),
-              SafeArea(
+        return Stack(
+          children: <Widget>[
+            const Positioned.fill(
+              child: RepaintBoundary(child: _PixelBackdrop()),
+            ),
+            Scaffold(
+              backgroundColor: Colors.transparent,
+              body: SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Center(
@@ -538,8 +594,8 @@ class _FullscreenChatScreen extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         );
       },
     );
@@ -547,10 +603,7 @@ class _FullscreenChatScreen extends StatelessWidget {
 }
 
 class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({
-    required this.memberProvider,
-    required this.petProvider,
-  });
+  const _HeaderCard({required this.memberProvider, required this.petProvider});
 
   final MemberProvider memberProvider;
   final PetProvider petProvider;
@@ -587,15 +640,15 @@ class _HeaderCard extends StatelessWidget {
               children: <Widget>[
                 Text(
                   '$petName \u00b7 ${petProvider.pet.mood.label}',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontSize: 17,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontSize: 17),
                 ),
                 Text(
                   'Your ${currentMember.name} \u00b7 on-device companion',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontSize: 12,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontSize: 12),
                 ),
               ],
             ),
@@ -613,13 +666,13 @@ class _HeaderCard extends StatelessWidget {
                 color: petProvider.llamaOnline
                     ? MochiPalette.mint
                     : downloading
-                        ? MochiPalette.yellow
-                        : MochiPalette.peach,
+                    ? MochiPalette.yellow
+                    : MochiPalette.peach,
                 icon: petProvider.llamaOnline
                     ? Icons.psychology_rounded
                     : downloading
-                        ? Icons.download_rounded
-                        : Icons.psychology_alt_rounded,
+                    ? Icons.download_rounded
+                    : Icons.psychology_alt_rounded,
               );
             },
           ),
@@ -656,9 +709,9 @@ class _InfoBadge extends StatelessWidget {
           const SizedBox(width: 4),
           Text(
             label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  fontSize: 11,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(fontSize: 11),
           ),
         ],
       ),
