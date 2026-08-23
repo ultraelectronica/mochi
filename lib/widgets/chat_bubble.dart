@@ -6,6 +6,7 @@ import '../models/mood.dart';
 import '../models/pet.dart';
 import '../providers/pet_provider.dart';
 import 'member_avatar.dart';
+import 'pet_sprite.dart';
 
 class ChatBubble extends StatelessWidget {
   const ChatBubble({
@@ -38,7 +39,7 @@ class ChatBubble extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: <Widget>[
         if (petSide) ...<Widget>[
-          MochiPetAvatar(mood: petProvider.pet.mood, size: 32),
+          MochiPetAvatar(pet: petProvider.pet, size: 32),
           const SizedBox(width: 8),
         ],
         Flexible(
@@ -95,12 +96,12 @@ class ChatBubble extends StatelessWidget {
 class MochiPetAvatar extends StatelessWidget {
   const MochiPetAvatar({
     super.key,
-    required this.mood,
+    required this.pet,
     this.size = 32,
     this.bordered = true,
   });
 
-  final MochiMood mood;
+  final Pet pet;
   final double size;
   final bool bordered;
 
@@ -111,16 +112,20 @@ class MochiPetAvatar extends StatelessWidget {
       height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: mood.color,
+        color: pet.mood.color,
         shape: BoxShape.circle,
         border: bordered
             ? Border.all(color: MochiPalette.ink, width: 2)
             : null,
       ),
-      child: Icon(
-        Icons.pets_rounded,
-        size: size * 0.5,
-        color: MochiPalette.ink,
+      clipBehavior: Clip.antiAlias,
+      child: Image.asset(
+        mochiSpriteAsset(pet),
+        width: size * 0.82,
+        height: size * 0.82,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.none,
+        gaplessPlayback: true,
       ),
     );
   }
