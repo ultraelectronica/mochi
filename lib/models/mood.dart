@@ -81,4 +81,17 @@ extension MochiMoodData on MochiMood {
     MochiMood.hungry => 'I could really go for a snack story right now.',
     MochiMood.confused => 'I am still learning this feeling, but I am trying.',
   };
+
+  /// Server `moods.tson` xpModifier — scales XP awarded to the pet.
+  double get xpModifier => switch (this) {
+    MochiMood.happy => 1.2,
+    MochiMood.laughing => 1.3,
+    MochiMood.normal => 1.0,
+    MochiMood.tired => 0.8,
+    MochiMood.sad => 0.9,
+    MochiMood.angry => 0.7,
+    MochiMood.scared => 0.5,
+    MochiMood.hungry => 0.75,
+    MochiMood.confused => 0.85,
+  };
 }
