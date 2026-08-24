@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -43,10 +44,24 @@ class MochiRepository {
     return row == null ? null : _memberFromRow(row);
   }
 
-  Member createProfile(String name, String colorHex) {
+  Member createProfile(
+    String name,
+    String colorHex, {
+    String? bio,
+    DateTime? birthdate,
+  }) {
+    final String? trimmedBio = _normalizedBio(bio);
+    _validateBirthdate(birthdate);
     _sql.execute(
-      'INSERT INTO members (name, avatar_color, created_at) VALUES (?, ?, ?)',
-      <Object?>[name, colorHex, MochiDb.nowIso()],
+      'INSERT INTO members (name, avatar_color, created_at, bio, birthdate) '
+      'VALUES (?, ?, ?, ?, ?)',
+      <Object?>[
+        name,
+        colorHex,
+        MochiDb.nowIso(),
+        trimmedBio,
+        birthdate == null ? null : formatBirthdate(birthdate),
+      ],
     );
     final int id = _sql.lastInsertRowId;
     _sql.execute(
@@ -58,6 +73,40 @@ class MochiRepository {
 
   void renameProfile(String name) {
     _sql.execute('UPDATE members SET name = ?', <Object?>[name]);
+  }
+
+  void updateProfile({String? bio, DateTime? birthdate}) {
+    final String? trimmedBio = _normalizedBio(bio);
+    _validateBirthdate(birthdate);
+    _sql.execute(
+      'UPDATE members SET bio = ?, birthdate = ?',
+      <Object?>[
+        trimmedBio,
+        birthdate == null ? null : formatBirthdate(birthdate),
+      ],
+    );
+  }
+
+  String? _normalizedBio(String? bio) {
+    final String? trimmed = bio?.trim();
+    if (trimmed == null || trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.length > GameConfig.maxBioLength) {
+      throw ArgumentError(
+        'Bio is too long (max ${GameConfig.maxBioLength} characters).',
+      );
+    }
+    return trimmed;
+  }
+
+  void _validateBirthdate(DateTime? birthdate) {
+    if (birthdate == null) {
+      return;
+    }
+    if (birthdate.isAfter(DateTime.now())) {
+      throw ArgumentError('Birthdate cannot be in the future.');
+    }
   }
 
   void touchProfileSeen(DateTime when) {
@@ -566,6 +615,158 @@ class MochiRepository {
         .toList(growable: false);
   }
 
+  // ---- Long-term recall (RAG-lite, Phase 3) ------------------------------
+
+  /// Test override for exercising the token-overlap fallback path.
+  @visibleForTesting
+  bool forceTokenOverlapFallback = false;
+
+  late final bool _ftsEnabled =
+      !forceTokenOverlapFallback && _compileFtsAvailable();
+
+  bool _compileFtsAvailable() {
+    final sqlite3.Row row = _sql.select(
+      "SELECT sqlite_compileoption_used('ENABLE_FTS5') AS used",
+    ).single;
+    return row['used'] == 1;
+  }
+
+  /// RAG-lite retrieval for the prompt: up to [k] memory snippets ranked by
+  /// keyword relevance (weight/recency as tiebreak), plus one past
+  /// conversation hit when it matches.
+  List<String> retrieveRelevantMemories(String query, {int k = 3}) {
+    final List<String> terms = _ftsTerms(query);
+    if (terms.isEmpty) {
+      return const <String>[];
+    }
+    final List<String> hits = <String>[];
+
+    if (_ftsEnabled) {
+      hits.addAll(_ftsMemoryHits(terms, k));
+      final String? interaction = _ftsInteractionHit(terms, query);
+      if (interaction != null) {
+        hits.add(interaction);
+      }
+    } else {
+      hits.addAll(_overlapMemoryHits(terms, k));
+      final String? interaction = _overlapInteractionHit(terms, query);
+      if (interaction != null) {
+        hits.add(interaction);
+      }
+    }
+    return hits;
+  }
+
+  /// FTS5 memory hits: `MATCH` on quoted prefix terms, bm25 rank first.
+  List<String> _ftsMemoryHits(List<String> terms, int k) {
+    final String match = _ftsMatch(terms);
+    return _sql
+        .select(
+          '''SELECT m.content AS content
+             FROM memories_fts
+             JOIN memories m ON m.id = memories_fts.rowid
+             WHERE memories_fts MATCH ?
+             ORDER BY bm25(memories_fts), m.weight DESC, m.created_at DESC
+             LIMIT ?''',
+          <Object?>[match, k],
+        )
+        .map((sqlite3.Row row) => (row['content'] as String).trim())
+        .where((String content) => content.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  String? _ftsInteractionHit(List<String> terms, String currentText) {
+    final String match = _ftsMatch(terms);
+    final sqlite3.Row? row = _selectOne(
+      '''SELECT i.input_text, i.response_text
+         FROM interactions_fts
+         JOIN interactions i ON i.id = interactions_fts.rowid
+         WHERE interactions_fts MATCH ? AND i.input_text <> ?
+         ORDER BY bm25(interactions_fts), i.created_at DESC LIMIT 1''',
+      <Object?>[match, currentText.trim()],
+    );
+    return row == null ? null : _interactionSnippet(row);
+  }
+
+  /// Fallback when FTS5 is unavailable: token-overlap scorer
+  /// `overlap * (weight * 10 + recencyBonus)` against the plain tables.
+  List<String> _overlapMemoryHits(List<String> terms, int k) {
+    final Map<String, double> scores = <String, double>{};
+    for (final sqlite3.Row row in _sql.select(
+      'SELECT content, weight, created_at FROM memories',
+    )) {
+      final String content = (row['content'] as String? ?? '').trim();
+      if (content.isEmpty) {
+        continue;
+      }
+      final int overlap = terms.where(
+        (String term) => content.toLowerCase().contains(term),
+      ).length;
+      if (overlap == 0) {
+        continue;
+      }
+      final int weight = row['weight'] as int;
+      final double recencyBonus = _recencyBonus(row['created_at']);
+      scores[content] = overlap * (weight * 10 + recencyBonus);
+    }
+    final List<String> sorted =
+        scores.keys.toList(growable: false)
+          ..sort((String a, String b) => scores[b]!.compareTo(scores[a]!));
+    return sorted.take(k).toList(growable: false);
+  }
+
+  String? _overlapInteractionHit(List<String> terms, String currentText) {
+    final sqlite3.ResultSet rows = _sql.select(
+      'SELECT input_text, response_text, created_at FROM interactions '
+      'ORDER BY created_at DESC LIMIT 200',
+    );
+    for (final sqlite3.Row row in rows) {
+      final String input = (row['input_text'] as String? ?? '').trim();
+      final String response = (row['response_text'] as String? ?? '').trim();
+      if (input == currentText.trim()) {
+        continue;
+      }
+      final String haystack = '$input $response'.toLowerCase();
+      if (terms.any(haystack.contains)) {
+        return _interactionSnippet(row);
+      }
+    }
+    return null;
+  }
+
+  String _interactionSnippet(sqlite3.Row row) {
+    final String input = (row['input_text'] as String? ?? '').trim();
+    final String response = (row['response_text'] as String? ?? '').trim();
+    return response.isEmpty ? input : response;
+  }
+
+  static String _ftsMatch(List<String> terms) =>
+      terms.map((String term) => '"$term"*').join(' OR ');
+
+  /// Sanitized, de-duplicated query tokens (alphanumeric, >=3 chars).
+  static List<String> _ftsTerms(String text) {
+    final List<String> terms = <String>[];
+    final HashSet<String> seen = HashSet<String>();
+    for (final String token
+        in text.toLowerCase().split(RegExp(r'[^a-z0-9]+'))) {
+      if (token.length < 3 || !seen.add(token)) {
+        continue;
+      }
+      terms.add(token);
+    }
+    return terms;
+  }
+
+  static double _recencyBonus(Object? createdAtRaw) {
+    final DateTime? createdAt = _parseDateOrNull(createdAtRaw)?.toUtc();
+    if (createdAt == null) {
+      return 0;
+    }
+    final int ageDays =
+        DateTime.now().toUtc().difference(createdAt).inDays;
+    return (30 - ageDays).clamp(0, 30).toDouble();
+  }
+
   // ---- Feed ---------------------------------------------------------------
   List<ActivityEntry> feed({int limit = 30}) {
     final List<Map<String, dynamic>> events = <Map<String, dynamic>>[];
@@ -680,6 +881,8 @@ class MochiRepository {
       isAdmin: false,
       invitePending: false,
       lastSeenAt: _parseDate(row['last_seen_at']),
+      bio: _memberBio(row['bio']),
+      birthdate: _parseDateOnly(row['birthdate']),
     );
   }
 
@@ -752,6 +955,25 @@ DateTime? _parseDateOrNull(Object? raw) {
     return null;
   }
   return DateTime.tryParse(raw)?.toLocal();
+}
+
+String? _memberBio(Object? raw) {
+  if (raw is! String) {
+    return null;
+  }
+  final String trimmed = raw.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+DateTime? _parseDateOnly(Object? raw) {
+  if (raw is! String || raw.trim().isEmpty) {
+    return null;
+  }
+  final DateTime? parsed = DateTime.tryParse(raw.trim());
+  if (parsed == null) {
+    return null;
+  }
+  return DateTime(parsed.year, parsed.month, parsed.day);
 }
 
 Color _colorFromHex(String raw) {
