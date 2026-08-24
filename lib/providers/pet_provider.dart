@@ -209,11 +209,32 @@ class PetProvider extends ChangeNotifier {
 
       final Pet pet = _repo.getPet()!;
       final List<String> memoryContents = _repo.memoriesForPrompt();
+      final List<String> relevant = _repo.retrieveRelevantMemories(
+        text,
+        k: GameConfig.memoryRetrievalLimit,
+      );
+      final int? chatSessionId = _activeSessionId;
+      final List<LlmChatMessage> history = chatSessionId == null
+          ? const <LlmChatMessage>[]
+          : <LlmChatMessage>[
+              for (final ChatEntry entry in _repo.chatHistory(
+                sessionId: chatSessionId,
+                limit: GameConfig.chatHistoryLimit,
+              ))
+                LlmChatMessage(
+                  role: entry.isPet ? 'assistant' : 'user',
+                  content: entry.text,
+                ),
+            ];
       final List<LlmChatMessage> messages = PromptBuilder.buildMessages(
         memberName: member.name,
         text: text,
         mood: pet.mood,
         memories: memoryContents,
+        history: history,
+        relevant: relevant,
+        bio: member.bio,
+        birthdate: member.birthdate,
         think: _thinkEnabled,
       );
 
@@ -259,7 +280,9 @@ class PetProvider extends ChangeNotifier {
       );
       _repo.deriveSessionTitle(sessionId, text);
       _repo.touchSession(sessionId);
-      _repo.upsertMemory(memberId: member.id, content: text);
+      if (_shouldRemember(text)) {
+        _repo.upsertMemory(memberId: member.id, content: text);
+      }
       _repo.checkStagePromotion();
       _repo.recalculateMood();
 
@@ -434,6 +457,22 @@ class PetProvider extends ChangeNotifier {
     _errorMessage = 'Failed to save this conversation on this device';
     debugPrint('[PetProvider] $error');
   }
+
+  /// Noise filter for auto-memories: only save messages that are substantial
+  /// AND about the user (personal-signal heuristic) so memory storage stays
+  /// high-signal.
+  bool _shouldRemember(String text) {
+    final String trimmed = text.trim();
+    if (trimmed.length <= GameConfig.memoryUpsertMinLength) {
+      return false;
+    }
+    return _personalSignal.hasMatch(trimmed);
+  }
+
+  static final RegExp _personalSignal = RegExp(
+    r"\b(i|i'm|i am|my|me|mine)\b",
+    caseSensitive: false,
+  );
 
   @override
   void dispose() {
