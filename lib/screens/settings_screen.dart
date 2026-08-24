@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
+import '../config/game_config.dart';
+import '../models/member.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
 import '../services/device_permission_service.dart';
@@ -324,6 +326,11 @@ class _SettingsScreenState extends State<SettingsScreen>
                   icon: Icons.person_rounded,
                 ),
                 const SizedBox(height: 10),
+                _AboutYouCard(
+                  member: widget.memberProvider.currentMember,
+                  onEdit: _editAboutYou,
+                ),
+                const SizedBox(height: 10),
                 _SettingsInfoRow(
                   title: 'Mochi\'s name',
                   subtitle: widget.petProvider.pet.name,
@@ -616,6 +623,14 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
     return MochiPalette.peach;
   }
+
+  Future<void> _editAboutYou() async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) =>
+          _EditAboutYouDialog(provider: widget.memberProvider),
+    );
+  }
 }
 
 class _SettingsInfoRow extends StatelessWidget {
@@ -852,6 +867,280 @@ class _SettingsLoadingRow extends StatelessWidget {
           const SizedBox(width: 12),
           Text(title, style: Theme.of(context).textTheme.bodyMedium),
         ],
+      ),
+    );
+  }
+}
+
+class _AboutYouCard extends StatelessWidget {
+  const _AboutYouCard({required this.member, required this.onEdit});
+
+  final Member member;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final String? bio = member.bio;
+    final DateTime? birthday = member.birthdate;
+    final int? age = member.age;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Icon(Icons.person_outline_rounded, color: MochiPalette.ink),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'About you',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onEdit,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.edit_rounded, size: 18),
+                label: const Text('Edit'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            birthday == null
+                ? 'Birthday: not set'
+                : 'Birthday: ${formatBirthdate(birthday)}'
+                    '${age == null ? '' : ' (age $age)'}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            bio ?? 'Nothing shared yet.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Stored only on this phone.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EditAboutYouDialog extends StatefulWidget {
+  const _EditAboutYouDialog({required this.provider});
+
+  final MemberProvider provider;
+
+  @override
+  State<_EditAboutYouDialog> createState() => _EditAboutYouDialogState();
+}
+
+class _EditAboutYouDialogState extends State<_EditAboutYouDialog> {
+  late final TextEditingController _bioController;
+  late DateTime? _birthdate;
+  String? _error;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final Member member = widget.provider.currentMember;
+    _bioController = TextEditingController(text: member.bio ?? '');
+    _birthdate = member.birthdate;
+  }
+
+  @override
+  void dispose() {
+    _bioController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickBirthdate() async {
+    final DateTime now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _birthdate ?? DateTime(now.year - 15, now.month, now.day),
+      firstDate: DateTime(1900),
+      lastDate: now,
+      helpText: 'Select your birthday',
+    );
+    if (picked != null && mounted) {
+      setState(() => _birthdate = picked);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_saving) {
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.provider.updateProfile(
+        bio: _bioController.text,
+        birthdate: _birthdate,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error.toString();
+        _saving = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: pixelCardDecoration(MochiPalette.cloudBlue),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('About you', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _bioController,
+                  maxLines: 4,
+                  maxLength: GameConfig.maxBioLength,
+                  decoration: const InputDecoration(
+                    labelText: 'A little about you',
+                    hintText: 'e.g. I love rainy days, jazz, and long walks',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _pickBirthdate,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: MochiPalette.ink,
+                          textStyle: const TextStyle(
+                            fontFamily: 'Pixelify Sans',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                        icon: const Icon(Icons.cake_rounded),
+                        label: Text(
+                          _birthdate == null
+                              ? 'Pick your birthday'
+                              : 'Birthday: ${formatBirthdate(_birthdate!)}',
+                        ),
+                      ),
+                    ),
+                    if (_birthdate != null)
+                      IconButton(
+                        onPressed: () => setState(() => _birthdate = null),
+                        icon: const Icon(Icons.close_rounded),
+                        color: MochiPalette.ink,
+                        tooltip: 'Clear birthday',
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Privacy: stored only on this phone.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (_error != null) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: MochiPalette.peach,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: <Widget>[
+                    TextButton(
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      style: TextButton.styleFrom(
+                        foregroundColor: MochiPalette.ink.withValues(
+                          alpha: 0.7,
+                        ),
+                        textStyle: const TextStyle(
+                          fontFamily: 'Pixelify Sans',
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.icon(
+                      onPressed: _saving ? null : _save,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: MochiPalette.cloudBlue,
+                        foregroundColor: MochiPalette.ink,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                        textStyle: const TextStyle(
+                          fontFamily: 'Pixelify Sans',
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          side: const BorderSide(
+                            color: MochiPalette.ink,
+                            width: 2.5,
+                          ),
+                        ),
+                      ),
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check_rounded),
+                      label: const Text('Save'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
