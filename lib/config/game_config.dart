@@ -10,6 +10,13 @@ class GameConfig {
 
   static const int maxMemoriesPerMember = 12;
   static const int memoryPruneDays = 30;
+  static const int maxBioLength = 500;
+
+  static const int memoryRetrievalLimit = 3;
+  static const int memoryUpsertMinLength = 12;
+
+  static const int chatHistoryLimit = 8;
+  static const int chatHistoryMaxTokens = 900;
 
   static const int defaultContextSize = 2048;
   static const int maxReplyTokens = 100;
