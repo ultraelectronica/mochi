@@ -55,7 +55,6 @@ class HomeScreen extends StatelessWidget {
                         pet: pet,
                         petProvider: petProvider,
                         currentMember: currentMember,
-                        totalMembers: memberProvider.members.length,
                         onPetTap: onPetTap,
                         onOpenChat: onOpenChat,
                       ),
@@ -76,7 +75,6 @@ class HomeScreen extends StatelessWidget {
                   pet: pet,
                   petProvider: petProvider,
                   currentMember: currentMember,
-                  totalMembers: memberProvider.members.length,
                   onPetTap: onPetTap,
                   onOpenChat: onOpenChat,
                 ),
@@ -112,7 +110,6 @@ class _HeroPanel extends StatefulWidget {
     required this.pet,
     required this.petProvider,
     required this.currentMember,
-    required this.totalMembers,
     required this.onPetTap,
     required this.onOpenChat,
   });
@@ -120,7 +117,6 @@ class _HeroPanel extends StatefulWidget {
   final Pet pet;
   final PetProvider petProvider;
   final Member currentMember;
-  final int totalMembers;
   final Future<int> Function() onPetTap;
   final VoidCallback onOpenChat;
 
@@ -185,7 +181,7 @@ class _HeroPanelState extends State<_HeroPanel> {
         ),
         const SizedBox(height: 10),
         Text(
-          'One shared pet, one bright family room.',
+          'Your tiny companion, right on your phone.',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 6),
@@ -211,7 +207,7 @@ class _HeroPanelState extends State<_HeroPanel> {
               label: 'Affinity',
               value: '${widget.currentMember.affection}%',
             ),
-            _MiniStatCard(label: 'Family', value: '${widget.totalMembers} members'),
+            const _MiniStatCard(label: 'Privacy', value: 'On-device'),
           ],
         ),
         const SizedBox(height: 12),
@@ -412,7 +408,7 @@ class _ProfilePanel extends StatelessWidget {
           const SizedBox(height: 8),
           if (memories.isEmpty)
             Text(
-              'Mochi will save favorite family moments here after a few conversations.',
+              'Mochi will save your favorite little moments here after a few chats.',
               style: Theme.of(context).textTheme.bodySmall,
             )
           else
@@ -653,8 +649,8 @@ class _MoodSummaryPanel extends StatelessWidget {
           _PanelTitle(
             title: 'Mood check-in',
             subtitle: locked
-                ? '${currentMember.name} already checked in today.'
-                : 'Tap below to pick one of the 9 moods and nudge Mochi\'s shared state.',
+                ? 'You already checked in today — see you tomorrow!'
+                : 'Pick a mood below — Mochi will feel it with you.',
           ),
           const SizedBox(height: 10),
           _Badge(
@@ -712,7 +708,7 @@ class _MoodSummaryPanel extends StatelessWidget {
           FilledButton.icon(
             onPressed: onOpenSheet,
             icon: Icon(locked ? Icons.visibility_rounded : Icons.mood_rounded),
-            label: Text(locked ? 'View family check-ins' : 'Check in'),
+            label: Text(locked ? 'View today\'s mood' : 'Check in'),
           ),
           const SizedBox(height: 8),
           Align(
@@ -763,7 +759,7 @@ class _FeedPanelState extends State<_FeedPanel> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Family activity feed',
+                      'Activity feed',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     if (!_expanded)
