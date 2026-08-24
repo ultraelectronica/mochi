@@ -104,41 +104,44 @@ ThemeData buildMochiTheme() {
     colorScheme: scheme,
     scaffoldBackgroundColor: MochiPalette.background,
     fontFamily: 'Pixelify Sans',
-    textTheme: ThemeData.light().textTheme.copyWith(
-      headlineMedium: const TextStyle(
-        fontSize: 31,
-        fontWeight: FontWeight.w700,
-        height: 1.05,
-        color: MochiPalette.ink,
-      ),
-      titleLarge: const TextStyle(
-        fontSize: 22,
-        fontWeight: FontWeight.w700,
-        color: MochiPalette.ink,
-      ),
-      titleMedium: const TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w700,
-        color: MochiPalette.ink,
-      ),
-      bodyLarge: TextStyle(
-        fontSize: 16,
-        height: 1.45,
-        fontWeight: FontWeight.w500,
-        color: MochiPalette.ink.withValues(alpha: 0.9),
-      ),
-      bodyMedium: TextStyle(
-        fontSize: 14,
-        height: 1.45,
-        fontWeight: FontWeight.w500,
-        color: MochiPalette.ink.withValues(alpha: 0.8),
-      ),
-      labelLarge: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w700,
-        color: MochiPalette.ink,
-      ),
-    ),
+    textTheme: ThemeData.light()
+        .textTheme
+        .apply(fontFamily: 'Pixelify Sans')
+        .copyWith(
+          headlineMedium: const TextStyle(
+            fontSize: 31,
+            fontWeight: FontWeight.w700,
+            height: 1.05,
+            color: MochiPalette.ink,
+          ),
+          titleLarge: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: MochiPalette.ink,
+          ),
+          titleMedium: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: MochiPalette.ink,
+          ),
+          bodyLarge: TextStyle(
+            fontSize: 16,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+            color: MochiPalette.ink.withValues(alpha: 0.9),
+          ),
+          bodyMedium: TextStyle(
+            fontSize: 14,
+            height: 1.45,
+            fontWeight: FontWeight.w500,
+            color: MochiPalette.ink.withValues(alpha: 0.8),
+          ),
+          labelLarge: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: MochiPalette.ink,
+          ),
+        ),
     navigationBarTheme: NavigationBarThemeData(
       height: 72,
       backgroundColor: Colors.white,
@@ -178,6 +181,31 @@ ThemeData buildMochiTheme() {
         ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: MochiPalette.ink, width: 2.5),
+        ),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: MochiPalette.ink,
+        textStyle: const TextStyle(
+          fontFamily: 'Pixelify Sans',
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: MochiPalette.ink,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        textStyle: const TextStyle(
+          fontFamily: 'Pixelify Sans',
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: MochiPalette.ink, width: 2.5),
         ),
       ),
