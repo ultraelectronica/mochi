@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
+import '../config/game_config.dart';
+import '../models/member.dart';
 import '../services/local_llm/model_manager.dart';
 import '../services/world_setup.dart';
 import '../widgets/model_setup_panel.dart';
@@ -25,6 +27,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   final TextEditingController _userController = TextEditingController();
   final TextEditingController _petController = TextEditingController(text: 'Mochi');
+  final TextEditingController _bioController = TextEditingController();
+  DateTime? _birthdate;
   Color _avatarColor = const Color(0xFF1D9E75);
 
   static const List<Color> _avatarPalette = <Color>[
@@ -40,6 +44,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void dispose() {
     _userController.dispose();
     _petController.dispose();
+    _bioController.dispose();
     super.dispose();
   }
 
@@ -64,6 +69,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         userName: userName,
         petName: _petController.text.trim(),
         avatarColor: _avatarColor,
+        bio: _bioController.text.trim(),
+        birthdate: _birthdate,
       );
       if (!mounted) {
         return;
@@ -232,6 +239,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             );
           }).toList(),
         ),
+        const SizedBox(height: 12),
+        _buildAboutYouSection(),
         const SizedBox(height: 20),
         FilledButton.icon(
           onPressed: _busy ? null : _continueToModel,
@@ -246,6 +255,72 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildAboutYouSection() {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 4),
+        leading: const Icon(Icons.auto_awesome_rounded),
+        title: Text(
+          'Tell Mochi about you',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        subtitle: Text(
+          'Optional. Mochi remembers what you share — never required.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        children: <Widget>[
+          TextField(
+            controller: _bioController,
+            maxLines: 4,
+            maxLength: GameConfig.maxBioLength,
+            decoration: const InputDecoration(
+              labelText: 'A little about you',
+              hintText: 'e.g. I love rainy days, jazz, and long walks',
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _pickBirthdate,
+                  icon: const Icon(Icons.cake_rounded),
+                  label: Text(
+                    _birthdate == null
+                        ? 'Pick your birthday'
+                        : 'Birthday: ${formatBirthdate(_birthdate!)}',
+                  ),
+                ),
+              ),
+              if (_birthdate != null)
+                IconButton(
+                  onPressed: () => setState(() => _birthdate = null),
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: 'Clear birthday',
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickBirthdate() async {
+    final DateTime now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _birthdate ?? DateTime(now.year - 15, now.month, now.day),
+      firstDate: DateTime(1900),
+      lastDate: now,
+      helpText: 'Select your birthday',
+    );
+    if (picked != null) {
+      setState(() => _birthdate = picked);
+    }
   }
 
   Widget _buildModelStep() {
