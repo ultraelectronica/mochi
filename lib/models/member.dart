@@ -12,6 +12,8 @@ class Member {
     required this.isAdmin,
     required this.invitePending,
     this.lastSeenAt,
+    this.bio,
+    this.birthdate,
   });
 
   final int id;
@@ -24,6 +26,10 @@ class Member {
   final bool isAdmin;
   final bool invitePending;
   final DateTime? lastSeenAt;
+  final String? bio;
+  final DateTime? birthdate;
+
+  int? get age => ageFromBirthdate(birthdate);
 
   factory Member.fromJson(Map<String, dynamic> json) {
     final int xp = _asInt(json['total_xp']);
@@ -42,6 +48,8 @@ class Member {
         invitePending:
             json['invite_pending'] == true || json['invite_pending'] == 1,
         lastSeenAt: _parseDateTime(json['last_seen_at']),
+        bio: _parseBio(json['bio']),
+        birthdate: _parseDateOnly(json['birthdate']),
       );
   }
 
@@ -52,6 +60,8 @@ class Member {
         .map((String part) => part.substring(0, 1).toUpperCase())
         .join();
   }
+
+  static const Object _unset = Object();
 
   Member copyWith({
     int? id,
@@ -64,6 +74,8 @@ class Member {
     bool? isAdmin,
     bool? invitePending,
     DateTime? lastSeenAt,
+    Object? bio = _unset,
+    Object? birthdate = _unset,
   }) {
     return Member(
       id: id ?? this.id,
@@ -76,6 +88,10 @@ class Member {
       isAdmin: isAdmin ?? this.isAdmin,
       invitePending: invitePending ?? this.invitePending,
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+      bio: identical(bio, _unset) ? this.bio : bio as String?,
+      birthdate: identical(birthdate, _unset)
+          ? this.birthdate
+          : birthdate as DateTime?,
     );
   }
 }
@@ -150,4 +166,48 @@ DateTime? _parseDateTime(Object? raw) {
     return null;
   }
   return DateTime.tryParse(raw)?.toLocal();
+}
+
+String? _parseBio(Object? raw) {
+  if (raw is! String) {
+    return null;
+  }
+  final String trimmed = raw.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+DateTime? _parseDateOnly(Object? raw) {
+  if (raw is! String || raw.trim().isEmpty) {
+    return null;
+  }
+  final DateTime? parsed = DateTime.tryParse(raw.trim());
+  if (parsed == null) {
+    return null;
+  }
+  return DateTime(parsed.year, parsed.month, parsed.day);
+}
+
+int? ageFromBirthdate(DateTime? birthdate) {
+  if (birthdate == null) {
+    return null;
+  }
+  final DateTime now = DateTime.now();
+  final DateTime today = DateTime(now.year, now.month, now.day);
+  final DateTime bd = DateTime(birthdate.year, birthdate.month, birthdate.day);
+  if (bd.isAfter(today)) {
+    return null;
+  }
+  int years = today.year - bd.year;
+  if (today.month < bd.month ||
+      (today.month == bd.month && today.day < bd.day)) {
+    years--;
+  }
+  return years;
+}
+
+String formatBirthdate(DateTime birthdate) {
+  final String y = birthdate.year.toString().padLeft(4, '0');
+  final String m = birthdate.month.toString().padLeft(2, '0');
+  final String d = birthdate.day.toString().padLeft(2, '0');
+  return '$y-$m-$d';
 }
