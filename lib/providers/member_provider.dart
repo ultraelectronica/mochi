@@ -64,6 +64,13 @@ class MemberProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateProfile({String? bio, DateTime? birthdate}) async {
+    _repo.updateProfile(bio: bio, birthdate: birthdate);
+    _profile = _repo.getProfile();
+    _currentMember = null;
+    notifyListeners();
+  }
+
   Future<void> clearSession() async {
     _profile = null;
     _currentMember = null;
