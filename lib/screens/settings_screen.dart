@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../config/app_config.dart';
 import '../config/game_config.dart';
+import '../config/legal_documents.dart';
 import '../models/member.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
@@ -13,6 +15,7 @@ import '../services/local_llm/model_manager.dart';
 import '../widgets/mochi_bottom_nav_bar.dart';
 import '../widgets/mochi_toast.dart';
 import '../widgets/model_setup_panel.dart';
+import 'legal_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -38,6 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   DevicePermissionSnapshot? _permissionSnapshot;
   FloatingMochiState? _floatingMochiState;
   String? _pendingPermissionKey;
+  String? _appVersion;
 
   void _showToast(
     String message, {
@@ -54,6 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     WidgetsBinding.instance.addObserver(this);
     _refreshPermissionSnapshot();
     _refreshFloatingMochiState();
+    _loadAppVersion();
   }
 
   @override
@@ -99,6 +104,45 @@ class _SettingsScreenState extends State<SettingsScreen>
     setState(() {
       _floatingMochiState = state;
     });
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final PackageInfo info = await PackageInfo.fromPlatform();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _appVersion = '${info.version} (build ${info.buildNumber})';
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _appVersion = 'unknown';
+      });
+    }
+  }
+
+  void _openLegalDocument(LegalDocument document) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => LegalScreen(document: document),
+      ),
+    );
+  }
+
+  void _openLicenses() {
+    showLicensePage(
+      context: context,
+      applicationName: AppConfig.appTitle,
+      applicationVersion: _appVersion,
+      applicationLegalese:
+          'Mochi is an on-device AI companion. The app source is MIT licensed; '
+          'the bundled LFM2.5 model is provided by Liquid AI under its own '
+          'licence.',
+    );
   }
 
   Future<void> _runPermissionAction({
@@ -591,6 +635,62 @@ class _SettingsScreenState extends State<SettingsScreen>
                         'Microphone and photo library usage descriptions are configured for iOS. The floating Mochi bubble, floating window access, and battery optimization controls are Android-only.',
                     icon: Icons.mobile_friendly_rounded,
                   ),
+                const SizedBox(height: 16),
+                Text(
+                  'Legal & about',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Read how Mochi handles your data, the terms for using it, and the licences behind it.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                _SettingsActionRow(
+                  title: 'Privacy Policy',
+                  subtitle:
+                      'What stays on this device — and what never leaves it.',
+                  icon: Icons.lock_outline_rounded,
+                  accentColor: MochiPalette.mint,
+                  onPressed: () =>
+                      _openLegalDocument(LegalDocument.privacyPolicy),
+                ),
+                const SizedBox(height: 10),
+                _SettingsActionRow(
+                  title: 'Terms and Conditions',
+                  subtitle: 'The rules for using Mochi.',
+                  icon: Icons.gavel_rounded,
+                  accentColor: MochiPalette.yellow,
+                  onPressed: () =>
+                      _openLegalDocument(LegalDocument.termsAndConditions),
+                ),
+                const SizedBox(height: 10),
+                _SettingsActionRow(
+                  title: 'AI & Model Notice',
+                  subtitle:
+                      'How on-device replies work and which model powers them.',
+                  icon: Icons.psychology_alt_rounded,
+                  accentColor: MochiPalette.lavender,
+                  onPressed: () =>
+                      _openLegalDocument(LegalDocument.aiAndModelNotice),
+                ),
+                const SizedBox(height: 10),
+                _SettingsActionRow(
+                  title: 'Open-source Licenses',
+                  subtitle:
+                      'Licences for the packages and model bundled with Mochi.',
+                  icon: Icons.inventory_2_outlined,
+                  accentColor: MochiPalette.cloudBlue,
+                  onPressed: _openLicenses,
+                ),
+                const SizedBox(height: 10),
+                _SettingsInfoRow(
+                  title: 'App version',
+                  subtitle: _appVersion == null
+                      ? 'Reading version...'
+                      : 'Version $_appVersion',
+                  icon: Icons.info_outline_rounded,
+                ),
               ],
             ),
           ),
@@ -668,6 +768,62 @@ class _SettingsInfoRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SettingsActionRow extends StatelessWidget {
+  const _SettingsActionRow({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accentColor,
+    required this.onPressed,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accentColor;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: accentColor.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: MochiPalette.ink, width: 2),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(icon, color: MochiPalette.ink),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(title, style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.chevron_right_rounded, color: MochiPalette.ink),
+            ],
+          ),
+        ),
       ),
     );
   }
