@@ -345,6 +345,15 @@ class MochiDb {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS mini_game_plays (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        game TEXT NOT NULL,
+        score INTEGER NOT NULL DEFAULT 0,
+        xp_awarded INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS interactions_session_idx
         ON interactions (session_id, created_at);
       CREATE INDEX IF NOT EXISTS interactions_created_idx
@@ -361,6 +370,8 @@ class MochiDb {
         ON feedings (created_at);
       CREATE INDEX IF NOT EXISTS stage_events_created_idx
         ON stage_events (created_at);
+      CREATE INDEX IF NOT EXISTS mini_game_plays_created_idx
+        ON mini_game_plays (created_at);
     ''');
   }
 

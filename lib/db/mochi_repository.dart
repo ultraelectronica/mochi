@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import '../config/game_config.dart';
+import '../games/mini_game.dart';
+import '../games/mini_game_scoring.dart';
 import '../models/chat_session.dart';
 import '../models/food.dart';
 import '../models/member.dart';
@@ -565,6 +567,187 @@ class MochiRepository {
     );
   }
 
+  // ---- Mini-games ---------------------------------------------------------
+
+  /// Scored plays today that actually earned XP (0 XP runs don't count).
+  int dailyMiniGamePlays({required int memberId}) {
+    return _sql
+        .select(
+          '''SELECT COUNT(*) AS count FROM mini_game_plays
+             WHERE member_id = ? AND xp_awarded > 0 AND created_at >= ?''',
+          <Object?>[memberId, _dayStartUtc],
+        )
+        .single['count'] as int;
+  }
+
+  /// Seconds until the next scored mini-game play (cooldown between rewards).
+  int miniGameCooldownRemainingSeconds({required int memberId}) {
+    final sqlite3.Row? last = _selectOne(
+      'SELECT created_at FROM mini_game_plays '
+      'WHERE member_id = ? AND xp_awarded > 0 '
+      'ORDER BY created_at DESC LIMIT 1',
+      <Object?>[memberId],
+    );
+    if (last == null) {
+      return 0;
+    }
+    final DateTime? lastAt = DateTime.tryParse(
+      last['created_at'] as String,
+    )?.toUtc();
+    if (lastAt == null) {
+      return 0;
+    }
+    final int elapsed = DateTime.now().toUtc().difference(lastAt).inSeconds;
+    final int remaining = GameConfig.miniGameCooldownSeconds - elapsed;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  Map<MiniGame, int> miniGameBestScores({required int memberId}) {
+    final Map<MiniGame, int> best = <MiniGame, int>{
+      for (final MiniGame game in MiniGame.values) game: 0,
+    };
+    for (final sqlite3.Row row in _sql.select(
+      'SELECT game, MAX(score) AS best FROM mini_game_plays '
+      'WHERE member_id = ? GROUP BY game',
+      <Object?>[memberId],
+    )) {
+      best[miniGameFromString(row['game'] as String)] = row['best'] as int;
+    }
+    return best;
+  }
+
+  /// Records a finished mini-game run and applies rewards unless the member is
+  /// on cooldown or out of daily scored plays, in which case the run is still
+  /// logged with 0 XP plus a tiny consolation mood bump.
+  MiniGameResult recordMiniGamePlay({
+    required int memberId,
+    required MiniGame game,
+    int score = 0,
+    int bestCombo = 0,
+    int moves = 0,
+    bool finished = true,
+  }) {
+    final int playsToday = dailyMiniGamePlays(memberId: memberId);
+    final int playsRemaining = math.max(
+      0,
+      GameConfig.miniGameDailyCap - playsToday,
+    );
+
+    if (miniGameCooldownRemainingSeconds(memberId: memberId) > 0) {
+      _recordMiniGameRow(
+        memberId: memberId,
+        game: game,
+        score: score,
+        xpAwarded: 0,
+      );
+      _applyConsolationMood();
+      return MiniGameResult(
+        outcome: MiniGameOutcome.cooldown,
+        playsRemaining: playsRemaining,
+      );
+    }
+    if (playsRemaining <= 0) {
+      _recordMiniGameRow(
+        memberId: memberId,
+        game: game,
+        score: score,
+        xpAwarded: 0,
+      );
+      _applyConsolationMood();
+      return const MiniGameResult(outcome: MiniGameOutcome.dailyCapReached);
+    }
+
+    final int baseXp = miniGameXpForScore(
+      game,
+      score: score,
+      bestCombo: bestCombo,
+      moves: moves,
+      finished: finished,
+    );
+    final int xpAwarded = baseXp > 0
+        ? awardXp(memberId: memberId, amount: baseXp)
+        : 0;
+    _recordMiniGameRow(
+      memberId: memberId,
+      game: game,
+      score: score,
+      xpAwarded: xpAwarded,
+    );
+    final int? satietyAfter = _applyMiniGameSideEffects(
+      game: game,
+      score: score,
+    );
+    checkStagePromotion();
+    return MiniGameResult(
+      outcome: MiniGameOutcome.rewarded,
+      xpAwarded: xpAwarded,
+      satietyAfter: satietyAfter,
+      playsRemaining: playsRemaining - 1,
+    );
+  }
+
+  void _recordMiniGameRow({
+    required int memberId,
+    required MiniGame game,
+    required int score,
+    required int xpAwarded,
+  }) {
+    _sql.execute(
+      '''INSERT INTO mini_game_plays
+         (member_id, game, score, xp_awarded, created_at)
+         VALUES (?, ?, ?, ?, ?)''',
+      <Object?>[memberId, game.name, score, xpAwarded, MochiDb.nowIso()],
+    );
+  }
+
+  /// Per-game mechanical side-effects. Returns the new satiety for Snack Catch,
+  /// null for games that don't touch satiety.
+  int? _applyMiniGameSideEffects({
+    required MiniGame game,
+    required int score,
+  }) {
+    final Pet pet = getPet()!;
+    final String now = MochiDb.nowIso();
+    switch (game) {
+      case MiniGame.snackCatch:
+        final int gain = math.min(12, score ~/ 12);
+        final int satietyAfter = _clamp(
+          pet.satiety + gain,
+          0,
+          GameConfig.satietyMax,
+        );
+        _sql.execute(
+          '''UPDATE pets
+             SET satiety = ?,
+                 satiety_updated_at = ?,
+                 mood_score = MIN(mood_score + 4, 100),
+                 mood = CASE WHEN mood = 'hungry' THEN 'happy' ELSE mood END''',
+          <Object?>[satietyAfter, now],
+        );
+        return satietyAfter;
+      case MiniGame.ticklePop:
+        _sql.execute(
+          '''UPDATE pets
+             SET mood_score = MIN(mood_score + 6, 100),
+                 mood = CASE
+                   WHEN MIN(mood_score + 6, 100) >= 88 THEN 'laughing'
+                   WHEN mood IN ('sad', 'angry', 'scared') THEN 'happy'
+                   ELSE mood
+                 END''',
+        );
+        return null;
+      case MiniGame.moodMatch:
+        return null;
+    }
+  }
+
+  /// Tiny mood bump for a play that couldn't earn XP (cooldown/daily cap).
+  void _applyConsolationMood() {
+    _sql.execute(
+      'UPDATE pets SET mood_score = MIN(mood_score + 1, 100)',
+    );
+  }
+
   // ---- Memories -----------------------------------------------------------
 
   List<MemorySnippet> listMemories({int limit = 10}) {
@@ -941,6 +1124,29 @@ class MochiRepository {
         'member_name': row['member_name'],
         'food_label': food.label,
         'detail': 'fed Mochi ${food.label}',
+      });
+    }
+
+    for (final sqlite3.Row row
+        in _sql.select(
+          '''SELECT mini_game_plays.id, mini_game_plays.created_at,
+                    mini_game_plays.game, mini_game_plays.score,
+                    mini_game_plays.xp_awarded,
+                    members.id AS member_id, members.name AS member_name
+             FROM mini_game_plays
+             JOIN members ON members.id = mini_game_plays.member_id
+             ORDER BY mini_game_plays.created_at DESC LIMIT ?''',
+          <Object?>[limit],
+        )) {
+      final MiniGame game = miniGameFromString(row['game'] as String);
+      events.add(<String, dynamic>{
+        'event_type': 'mini_game',
+        'created_at': row['created_at'],
+        'member_name': row['member_name'],
+        'game_label': game.label,
+        'score': row['score'],
+        'xp_awarded': row['xp_awarded'],
+        'detail': 'played ${game.label}',
       });
     }
 
