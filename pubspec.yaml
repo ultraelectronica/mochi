@@ -97,6 +97,11 @@ flutter:
     - assets/mochi/svg/mochi_normal_svg.svg
     - assets/mochi/svg/mochi_scared_svg.svg
     - assets/mochi/svg/mochi_tired_svg.svg
+    - assets/foods/svg/dango.svg
+    - assets/foods/svg/matcha_tea.svg
+    - assets/foods/svg/onigiri.svg
+    - assets/foods/svg/ramen.svg
+    - assets/foods/svg/strawberry_daifuku.svg
 
   fonts:
     - family: Pixelify Sans

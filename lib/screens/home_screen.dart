@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../config/app_config.dart';
 import '../config/game_config.dart';
@@ -13,6 +14,7 @@ import '../widgets/mochi_toast.dart';
 import '../widgets/pet_sprite.dart';
 import '../widgets/mochi_bottom_nav_bar.dart';
 import '../widgets/xp_bar.dart';
+import 'play_panel.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
@@ -88,6 +90,8 @@ class HomeScreen extends StatelessWidget {
                   memories: petProvider.memories,
                 ),
               ],
+              const SizedBox(height: 16),
+              PlayPanel(petProvider: petProvider),
               const SizedBox(height: 16),
               _MoodSummaryPanel(
                 currentMember: currentMember,
@@ -528,17 +532,18 @@ class _FoodCard extends StatelessWidget {
             child: Row(
               children: <Widget>[
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: 64,
+                  height: 64,
                   alignment: Alignment.center,
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
                     color: MochiPalette.yellow.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: MochiPalette.ink, width: 2),
                   ),
-                  child: Text(
-                    food.emoji,
-                    style: const TextStyle(fontSize: 24),
+                  child: SvgPicture.asset(
+                    food.asset,
+                    fit: BoxFit.contain,
                   ),
                 ),
                 const SizedBox(width: 12),
