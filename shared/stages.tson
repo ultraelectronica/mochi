@@ -1,0 +1,32 @@
+[
+  {
+    "stage": 1,
+    "name": "Egg",
+    "xpRequired": 0,
+    "note": "Still sleeping inside a shared family glow."
+  },
+  {
+    "stage": 2,
+    "name": "Hatchling",
+    "xpRequired": 100,
+    "note": "Tiny feelings, quick reactions, very curious eyes."
+  },
+  {
+    "stage": 3,
+    "name": "Pup",
+    "xpRequired": 300,
+    "note": "Learning family rhythms and playful voice habits."
+  },
+  {
+    "stage": 4,
+    "name": "Companion",
+    "xpRequired": 700,
+    "note": "Warm, expressive, and deeply tuned to the home."
+  },
+  {
+    "stage": 5,
+    "name": "Wise Elder",
+    "xpRequired": 1500,
+    "note": "Rich memory, calm presence, and gentle wisdom."
+  }
+]

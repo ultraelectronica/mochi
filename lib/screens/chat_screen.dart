@@ -1,0 +1,1231 @@
+// Hallmark · macrostructure: Chat Workbench · tone: playful · anchor hue: pet-mood
+// pre-emit critique: P5 H5 E5 S5 R5 V4
+// redesign: chat screen rebuilt in Mochi's pixel-storybook language
+//   - extracted MochiPetAvatar helper, de-duped inline Member construction
+//   - empty state -> pixel intro (3 breathing swatches + avatar + prompt)
+//   - header trimmed: status dots + fullscreen icon, no collapse toggle
+//   - chat card accent shifts with pet.mood.tint (matches home hero pattern)
+//   - bubble grouping: meta row (author + timestamp) shows on first of a group
+//   - date chips between cross-day groups
+//   - typing indicator: pulsing pet avatar instead of generic dots
+//   - composer: dense row + "Listening..." pill when mic is active
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../config/app_config.dart';
+import '../models/chat_session.dart';
+import '../models/member.dart';
+import '../models/mood.dart';
+import '../models/pet.dart';
+import '../providers/member_provider.dart';
+import '../providers/pet_provider.dart';
+import '../services/stt_service.dart';
+import '../widgets/chat_bubble.dart';
+import '../widgets/mochi_bottom_nav_bar.dart';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({
+    super.key,
+    required this.petProvider,
+    required this.memberProvider,
+    required this.onSendMessage,
+    required this.onRefreshHistory,
+    this.onToggleFullscreen,
+    this.isFullscreen = false,
+  });
+
+  final PetProvider petProvider;
+  final MemberProvider memberProvider;
+  final Future<void> Function(String text, {String inputType}) onSendMessage;
+  final Future<void> Function() onRefreshHistory;
+  final VoidCallback? onToggleFullscreen;
+  final bool isFullscreen;
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen>
+    with SingleTickerProviderStateMixin {
+  late final TextEditingController _controller;
+  late final ScrollController _scrollController;
+  final SttService _stt = SttService();
+  bool _isListening = false;
+  int _lastRenderedEntryCount = 0;
+  late final AnimationController _breath;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _scrollController = ScrollController();
+    _stt.initialize();
+    _breath = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _scrollController.dispose();
+    _stt.cancel();
+    _breath.dispose();
+    super.dispose();
+  }
+
+  void _scrollToEnd() {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent + 80,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Future<void> _send({String inputType = 'text'}) async {
+    final String text = _controller.text.trim();
+    if (text.isEmpty || widget.petProvider.replyPending) {
+      return;
+    }
+    _controller.clear();
+    await widget.onSendMessage(text, inputType: inputType);
+  }
+
+  Future<void> _toggleMic() async {
+    if (_isListening) {
+      final String result = await _stt.stopListening();
+      setState(() {
+        _isListening = false;
+      });
+      final String text = result.trim();
+      if (text.isNotEmpty && !widget.petProvider.replyPending) {
+        _controller.text = text;
+        await _send(inputType: 'voice');
+      }
+      return;
+    }
+
+    final bool available = await _stt.initialize();
+    if (!available) {
+      return;
+    }
+
+    await _stt.startListening(
+      onResult: (String result) {
+        if (result.trim().isNotEmpty) {
+          setState(() {
+            _controller.text = result;
+          });
+        }
+      },
+    );
+    setState(() {
+      _isListening = true;
+    });
+  }
+
+  Future<void> _refreshHistory() async {
+    await widget.onRefreshHistory();
+  }
+
+  void _openSessionsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext context) =>
+          _ChatSessionsSheet(petProvider: widget.petProvider),
+    );
+  }
+
+  String _dateLabel(DateTime when) {
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime that = DateTime(when.year, when.month, when.day);
+    final int diff = today.difference(that).inDays;
+    if (diff == 0) {
+      return 'Today';
+    }
+    if (diff == 1) {
+      return 'Yesterday';
+    }
+    const List<String> months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[when.month - 1]} ${when.day}';
+  }
+
+  bool _isNewDay(DateTime a, DateTime b) {
+    return a.year != b.year || a.month != b.month || a.day != b.day;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Pet pet = widget.petProvider.pet;
+    final Member currentMember = widget.memberProvider.currentMember;
+    final int visibleEntryCount = _itemCount();
+
+    if (visibleEntryCount != _lastRenderedEntryCount) {
+      _lastRenderedEntryCount = visibleEntryCount;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+    }
+
+    return Column(
+      children: <Widget>[
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          decoration: pixelCardDecoration(pet.mood.color),
+          child: _ExpandedChatHeader(
+            pet: pet,
+            serverOnline: widget.petProvider.serverOnline,
+            ttsEnabled: widget.petProvider.ttsEnabled,
+            isFullscreen: widget.isFullscreen,
+            onToggleFullscreen: widget.onToggleFullscreen,
+            onOpenSessions: _openSessionsSheet,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Expanded(
+          child: RepaintBoundary(
+            child: Container(
+              decoration: pixelCardDecoration(pet.mood.tint),
+              child: RefreshIndicator(
+                onRefresh: _refreshHistory,
+                child:
+                    widget.petProvider.chatEntries.isEmpty &&
+                        !widget.petProvider.replyPending
+                    ? ListView(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                        children: <Widget>[
+                          _EmptyChatIntro(pet: pet, breath: _breath),
+                        ],
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                        itemCount: _itemCount(),
+                        itemBuilder: (BuildContext context, int index) {
+                          return _buildListItem(index, currentMember, pet);
+                        },
+                      ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (widget.petProvider.errorMessage != null) ...<Widget>[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: pixelCardDecoration(MochiPalette.peach),
+            child: Row(
+              children: <Widget>[
+                const Icon(
+                  Icons.sync_problem_rounded,
+                  color: MochiPalette.ink,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.petProvider.errorMessage!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                TextButton(
+                  onPressed: _refreshHistory,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    minimumSize: const Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        _Composer(
+          controller: _controller,
+          isListening: _isListening,
+          micEnabled: _stt.isAvailable,
+          thinkEnabled: widget.petProvider.thinkEnabled,
+          replyPending: widget.petProvider.replyPending,
+          onSend: _send,
+          onToggleMic: _toggleMic,
+          onToggleThink: () => widget.petProvider.setThinkEnabled(
+            !widget.petProvider.thinkEnabled,
+          ),
+        ),
+        SizedBox(
+          height: widget.isFullscreen
+              ? 14
+              : MochiBottomNavBar.overlayPadding(context) + 24,
+        ),
+      ],
+    );
+  }
+
+  int _itemCount() {
+    final List<ChatEntry> entries = widget.petProvider.chatEntries;
+    // The streaming Mochi entry already lives in chatEntries; no extra slot.
+    return entries.length + _dateChipCount();
+  }
+
+  int _dateChipCount() {
+    final List<ChatEntry> entries = widget.petProvider.chatEntries;
+    if (entries.isEmpty) {
+      return 0;
+    }
+    int count = 1;
+    for (int i = 1; i < entries.length; i++) {
+      if (_isNewDay(entries[i - 1].createdAt, entries[i].createdAt)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  Widget _buildListItem(int index, Member currentMember, Pet pet) {
+    final List<ChatEntry> entries = widget.petProvider.chatEntries;
+    final bool replyPending = widget.petProvider.replyPending;
+    int i = 0;
+    int entryIndex = 0;
+    while (entryIndex < entries.length) {
+      if (entryIndex == 0) {
+        if (index == i) {
+          return _DateChip(label: _dateLabel(entries[0].createdAt));
+        }
+        i += 1;
+      } else {
+        final bool dayChanged = _isNewDay(
+          entries[entryIndex - 1].createdAt,
+          entries[entryIndex].createdAt,
+        );
+        if (dayChanged) {
+          if (index == i) {
+            return _DateChip(label: _dateLabel(entries[entryIndex].createdAt));
+          }
+          i += 1;
+        }
+      }
+      if (index == i) {
+        final ChatEntry curr = entries[entryIndex];
+        final bool isFirst = entryIndex == 0;
+        final ChatEntry? prev = isFirst ? null : entries[entryIndex - 1];
+        final bool showMeta =
+            isFirst ||
+            (prev!.isPet != curr.isPet) ||
+            (prev.author != curr.author) ||
+            _isNewDay(prev.createdAt, curr.createdAt);
+        // While Mochi is still waiting for the first token, the pending
+        // stream entry is empty — show the typing avatar instead of a
+        // hollow bubble. Once tokens arrive it becomes a normal bubble.
+        final bool awaitingFirstToken =
+            replyPending &&
+            entryIndex == entries.length - 1 &&
+            curr.isPet &&
+            curr.text.isEmpty;
+        if (awaitingFirstToken) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _TypingAvatar(pet: pet, breath: _breath),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: ChatBubble(
+            entry: curr,
+            currentMember: currentMember,
+            petProvider: widget.petProvider,
+            showAuthor: showMeta,
+            showTimestamp: showMeta,
+          ),
+        );
+      }
+      i += 1;
+      entryIndex += 1;
+    }
+    return const SizedBox.shrink();
+  }
+}
+
+class _ExpandedChatHeader extends StatelessWidget {
+  const _ExpandedChatHeader({
+    required this.pet,
+    required this.serverOnline,
+    required this.ttsEnabled,
+    required this.isFullscreen,
+    required this.onToggleFullscreen,
+    required this.onOpenSessions,
+  });
+
+  final Pet pet;
+  final bool serverOnline;
+  final bool ttsEnabled;
+  final bool isFullscreen;
+  final VoidCallback? onToggleFullscreen;
+  final VoidCallback onOpenSessions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            MochiPetAvatar(pet: pet, size: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    'Chat with Mochi',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(fontSize: 14),
+                  ),
+                  Text(
+                    '${pet.mood.label} tone \u00b7 short warm replies',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            _StatusDots(serverOnline: serverOnline, ttsEnabled: ttsEnabled),
+            const SizedBox(width: 4),
+            _IconAction(
+              icon: Icons.history_rounded,
+              tooltip: 'Chat history',
+              onPressed: onOpenSessions,
+            ),
+            if (onToggleFullscreen != null) ...<Widget>[
+              const SizedBox(width: 4),
+              _IconAction(
+                icon: isFullscreen
+                    ? Icons.close_fullscreen_rounded
+                    : Icons.open_in_full_rounded,
+                tooltip: isFullscreen ? 'Exit full' : 'Full screen',
+                onPressed: onToggleFullscreen!,
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _StatusDots extends StatelessWidget {
+  const _StatusDots({required this.serverOnline, required this.ttsEnabled});
+
+  final bool serverOnline;
+  final bool ttsEnabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _StatusDot(
+          color: serverOnline ? MochiPalette.mint : MochiPalette.peach,
+          tooltip: serverOnline
+              ? 'Chats save on this device'
+              : 'Unable to save',
+          icon: serverOnline
+              ? Icons.phone_android_rounded
+              : Icons.sync_problem_rounded,
+        ),
+        const SizedBox(width: 4),
+        _StatusDot(
+          color: ttsEnabled ? MochiPalette.lightPink : MochiPalette.cloudBlue,
+          tooltip: ttsEnabled ? 'Voice on' : 'Voice muted',
+          icon: ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+        ),
+      ],
+    );
+  }
+}
+
+class _StatusDot extends StatelessWidget {
+  const _StatusDot({
+    required this.color,
+    required this.tooltip,
+    required this.icon,
+  });
+
+  final Color color;
+  final String tooltip;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: MochiPalette.ink, width: 1.5),
+        ),
+        child: Icon(icon, size: 12, color: MochiPalette.ink),
+      ),
+    );
+  }
+}
+
+class _IconAction extends StatelessWidget {
+  const _IconAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(
+        side: BorderSide(color: MochiPalette.ink, width: 1.5),
+      ),
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: Tooltip(
+          message: tooltip,
+          child: Container(
+            width: 26,
+            height: 26,
+            alignment: Alignment.center,
+            child: Icon(icon, size: 14, color: MochiPalette.ink),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DateChip extends StatelessWidget {
+  const _DateChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: MochiPalette.card,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: MochiPalette.ink, width: 1.5),
+          ),
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              fontSize: 11,
+              color: MochiPalette.ink.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TypingAvatar extends StatelessWidget {
+  const _TypingAvatar({required this.pet, required this.breath});
+
+  final Pet pet;
+  final Animation<double> breath;
+
+  @override
+  Widget build(BuildContext context) {
+    final MochiMood mood = pet.mood;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        AnimatedBuilder(
+          animation: breath,
+          builder: (BuildContext context, Widget? child) {
+            final double pulse = 1 + (breath.value * 0.06);
+            final double opacity = 0.85 + (breath.value * 0.15);
+            return Opacity(
+              opacity: opacity,
+              child: Transform.scale(scale: pulse, child: child),
+            );
+          },
+          child: MochiPetAvatar(pet: pet, size: 32),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: mood.color.withValues(alpha: 0.18),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(18),
+              topRight: Radius.circular(18),
+              bottomLeft: Radius.circular(6),
+              bottomRight: Radius.circular(18),
+            ),
+            border: Border.all(color: MochiPalette.ink, width: 2),
+          ),
+          child: Text(
+            '${mood.label.toLowerCase()} \u00b7 thinking',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: MochiPalette.ink.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EmptyChatIntro extends StatelessWidget {
+  const _EmptyChatIntro({required this.pet, required this.breath});
+
+  final Pet pet;
+  final Animation<double> breath;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Color> swatch = <Color>[
+      MochiPalette.lightPink,
+      MochiPalette.cloudBlue,
+      MochiPalette.yellow,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List<Widget>.generate(swatch.length, (int i) {
+              return Padding(
+                padding: EdgeInsets.symmetric(horizontal: i == 1 ? 8 : 0),
+                child: AnimatedBuilder(
+                  animation: breath,
+                  builder: (BuildContext context, Widget? child) {
+                    final double phase =
+                        (breath.value + i / swatch.length) % 1.0;
+                    final double opacity = 0.55 + (0.45 * phase);
+                    return Opacity(opacity: opacity, child: child);
+                  },
+                  child: Container(
+                    width: 22,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: swatch[i],
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: MochiPalette.ink, width: 1.5),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 18),
+          MochiPetAvatar(pet: pet, size: 72),
+          const SizedBox(height: 14),
+          Text(
+            'Mochi is listening',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'Send a tiny moment to begin the shared chat history.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Everything stays on this phone.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontSize: 12,
+              color: MochiPalette.ink.withValues(alpha: 0.55),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Composer extends StatelessWidget {
+  const _Composer({
+    required this.controller,
+    required this.isListening,
+    required this.micEnabled,
+    required this.thinkEnabled,
+    required this.replyPending,
+    required this.onSend,
+    required this.onToggleMic,
+    required this.onToggleThink,
+  });
+
+  final TextEditingController controller;
+  final bool isListening;
+  final bool micEnabled;
+  final bool thinkEnabled;
+  final bool replyPending;
+  final Future<void> Function({String inputType}) onSend;
+  final VoidCallback onToggleMic;
+  final VoidCallback onToggleThink;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      decoration: pixelCardDecoration(MochiPalette.yellow),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => onSend(),
+                  decoration: InputDecoration(
+                    hintText: isListening
+                        ? 'Listening...'
+                        : 'Tell Mochi a tiny moment...',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: onToggleThink,
+                icon: Icon(
+                  thinkEnabled
+                      ? Icons.psychology_rounded
+                      : Icons.psychology_alt_outlined,
+                ),
+                color: thinkEnabled ? MochiPalette.sky : null,
+                tooltip: thinkEnabled
+                    ? 'Deep think on \u00b7 Mochi ponders before replying'
+                    : 'Deep think off',
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                onPressed: micEnabled ? onToggleMic : null,
+                icon: Icon(
+                  isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                ),
+                color: isListening ? MochiPalette.lightPink : null,
+                tooltip: 'Voice input',
+                visualDensity: VisualDensity.compact,
+              ),
+              const SizedBox(width: 4),
+              FilledButton.icon(
+                onPressed: replyPending ? null : onSend,
+                icon: const Icon(Icons.send_rounded, size: 16),
+                label: const Text('Send'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontFamily: 'Pixelify Sans',
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (isListening) ...<Widget>[
+            const SizedBox(height: 8),
+            _ListeningPill(),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ListeningPill extends StatefulWidget {
+  @override
+  State<_ListeningPill> createState() => _ListeningPillState();
+}
+
+class _ListeningPillState extends State<_ListeningPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: MochiPalette.lightPink,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: MochiPalette.ink, width: 1.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (BuildContext context, Widget? child) {
+                final double scale = 0.7 + (_controller.value * 0.5);
+                return Transform.scale(scale: scale, child: child);
+              },
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: MochiPalette.ink,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Listening \u00b7 tap mic to stop',
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontSize: 11,
+                color: MochiPalette.ink,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatSessionsSheet extends StatefulWidget {
+  const _ChatSessionsSheet({required this.petProvider});
+
+  final PetProvider petProvider;
+
+  @override
+  State<_ChatSessionsSheet> createState() => _ChatSessionsSheetState();
+}
+
+class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_reload());
+  }
+
+  Future<void> _reload() async {
+    setState(() => _loading = true);
+    try {
+      await widget.petProvider.loadSessions();
+    } catch (_) {}
+    if (mounted) {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _confirmDelete(ChatSession session) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: pixelCardDecoration(MochiPalette.peach),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'Delete chat?',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'This removes "${session.title}" and its messages. This cannot be undone.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: <Widget>[
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        style: TextButton.styleFrom(
+                          foregroundColor: MochiPalette.ink.withValues(
+                            alpha: 0.7,
+                          ),
+                          textStyle: const TextStyle(
+                            fontFamily: 'Pixelify Sans',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: MochiPalette.peach,
+                          foregroundColor: MochiPalette.ink,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 14,
+                          ),
+                          textStyle: const TextStyle(
+                            fontFamily: 'Pixelify Sans',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: const BorderSide(
+                              color: MochiPalette.ink,
+                              width: 2.5,
+                            ),
+                          ),
+                        ),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    try {
+      await widget.petProvider.deleteSession(session.id);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.petProvider,
+      builder: (BuildContext context, Widget? child) {
+        final List<ChatSession> sessions = widget.petProvider.sessions;
+        final int? activeId = widget.petProvider.activeSessionId;
+
+        return SafeArea(
+          top: false,
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            decoration: pixelCardDecoration(MochiPalette.cloudBlue),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.8,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: MochiPalette.ink.withValues(alpha: 0.24),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: <Widget>[
+                      const Icon(Icons.forum_rounded, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Chats',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      if (_loading)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2.4),
+                        ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                        tooltip: 'Close',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('New chat'),
+                      onPressed: () {
+                        widget.petProvider.startNewSession();
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: sessions.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: <Widget>[
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 32,
+                                ),
+                                child: Column(
+                                  children: <Widget>[
+                                    Icon(
+                                      Icons.chat_bubble_outline_rounded,
+                                      size: 36,
+                                      color: MochiPalette.ink.withValues(
+                                        alpha: 0.4,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      'No saved chats yet',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodyMedium,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Start a new chat above. It saves once you send a message.',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            fontSize: 12,
+                                            color: MochiPalette.ink.withValues(
+                                              alpha: 0.55,
+                                            ),
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          )
+                        : RefreshIndicator(
+                            onRefresh: _reload,
+                            child: ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              shrinkWrap: true,
+                              itemCount: sessions.length,
+                              separatorBuilder:
+                                  (BuildContext context, int index) =>
+                                      const SizedBox(height: 8),
+                              itemBuilder: (BuildContext context, int index) {
+                                final ChatSession session = sessions[index];
+                                return _SessionTile(
+                                  session: session,
+                                  isActive: session.id == activeId,
+                                  onSelect: () {
+                                    widget.petProvider
+                                        .selectSession(session.id)
+                                        .catchError((Object _) {});
+                                    Navigator.of(context).pop();
+                                  },
+                                  onDelete: () => _confirmDelete(session),
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SessionTile extends StatelessWidget {
+  const _SessionTile({
+    required this.session,
+    required this.isActive,
+    required this.onSelect,
+    required this.onDelete,
+  });
+
+  final ChatSession session;
+  final bool isActive;
+  final VoidCallback onSelect;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: isActive ? MochiPalette.mint.withValues(alpha: 0.6) : Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onSelect,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: MochiPalette.ink, width: 2),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isActive ? MochiPalette.mint : MochiPalette.cloudBlue,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: MochiPalette.ink, width: 1.5),
+                ),
+                child: Icon(
+                  isActive
+                      ? Icons.chat_rounded
+                      : Icons.chat_bubble_outline_rounded,
+                  size: 15,
+                  color: MochiPalette.ink,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      session.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.labelLarge?.copyWith(fontSize: 13),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      session.preview.isEmpty
+                          ? 'No messages yet'
+                          : session.preview,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontSize: 12,
+                        color: MochiPalette.ink.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${session.memberName} \u00b7 ${session.messageCount} '
+                      '${session.messageCount == 1 ? "turn" : "turns"} \u00b7 '
+                      '${session.timestamp}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontSize: 11,
+                        color: MochiPalette.ink.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                onPressed: onDelete,
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 18,
+                  color: MochiPalette.ink.withValues(alpha: 0.6),
+                ),
+                tooltip: 'Delete chat',
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

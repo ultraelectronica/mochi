@@ -11,6 +11,7 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+.hallmark/
 
 # IntelliJ related
 *.iml
@@ -32,6 +33,12 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/server/.env
+/server/mochi.db
+/server/mochi.db-shm
+/server/mochi.db-wal
+/server/node_modules/
+/server/logs/
 
 # Symbolication related
 app.*.symbols
@@ -43,3 +50,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# graphify knowledge graph (machine-local, rebuilt via hook / graphify --update)
+/graphify-out/
+
+# Local credentials scratch file — never commit
+accounts.txt

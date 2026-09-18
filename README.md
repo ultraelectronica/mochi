@@ -1,17 +1,18 @@
-# mochi
+# Mochi
 
-A new Flutter project.
+*One tiny AI pet for your phone — chat, play, feed, and watch it grow. A companion, not an assistant.*
 
-## Getting Started
+**Mochi** is a fully on-device AI companion pet. A small language model lives on your phone — no server, no accounts, no API keys — and grows more expressive the more time you spend together. Talk with it, check in on its moods, feed it, play mini-games, and watch it evolve through life stages. It remembers moments and reacts to how you treat it. It is not a smart assistant; it is a companion.
 
-This project is a starting point for a Flutter application.
+## Getting started
 
-A few resources to get you started if this is your first Flutter project:
+```bash
+flutter pub get
+flutter run
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+First run asks your name, names your Mochi, then downloads the default model (731 MB). Everything after that works offline.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## License
+
+This project is licensed under the [MIT License](LICENSE).

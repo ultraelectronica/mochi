@@ -1,5 +1,5 @@
 name: mochi
-description: "A new Flutter project."
+description: "On-device AI companion pet that lives on your phone - chat with Mochi, track moods, memories, and growth. No server."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 0.1.0-pre.1+1
 
 environment:
   sdk: ^3.11.4
@@ -33,7 +33,16 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter:
     sdk: flutter
-
+  flutter_svg: ^2.0.10+1
+  flutter_tts: ^4.2.2
+  http: ^1.2.2
+  llama_cpp_dart: ^0.9.0-dev.12
+  package_info_plus: ^10.2.1
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  shared_preferences: ^2.5.3
+  speech_to_text: ^7.0.0
+  sqlite3: ^3.5.2
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
   flutter_lints: ^6.0.0
@@ -54,7 +63,46 @@ flutter:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
   assets:
-    - assets/mochi/png/
+    - assets/icons/png/chat.png
+    - assets/icons/png/home.png
+    - assets/icons/png/pencil.png
+    - assets/icons/png/settings.png
+    - assets/icons/svg/chat_svg.svg
+    - assets/icons/svg/home_svg.svg
+    - assets/icons/svg/pencil_svg.svg
+    - assets/icons/svg/settings_svg.svg
+    - assets/mochi/png/baby_mochi_crying.png
+    - assets/mochi/png/baby_mochi_happy.png
+    - assets/mochi/png/baby_mochi_normal.png
+    - assets/mochi/png/baby_mochi_sad.png
+    - assets/mochi/png/mochi_angry.png
+    - assets/mochi/png/mochi_confused.png
+    - assets/mochi/png/mochi_egg.png
+    - assets/mochi/png/mochi_happy.png
+    - assets/mochi/png/mochi_hungry.png
+    - assets/mochi/png/mochi_laughing.png
+    - assets/mochi/png/mochi_normal.png
+    - assets/mochi/png/mochi_sad.png
+    - assets/mochi/png/mochi_scared.png
+    - assets/mochi/png/mochi_tired.png
+    - assets/mochi/svg/baby_mochi_crying_svg.svg
+    - assets/mochi/svg/baby_mochi_happy_svg.svg
+    - assets/mochi/svg/baby_mochi_normal_svg.svg
+    - assets/mochi/svg/baby_mochi_sad_svg.svg
+    - assets/mochi/svg/mochi_angry_svg.svg
+    - assets/mochi/svg/mochi_confused_svg.svg
+    - assets/mochi/svg/mochi_egg_svg.svg
+    - assets/mochi/svg/mochi_happy_svg.svg
+    - assets/mochi/svg/mochi_hungry_svg.svg
+    - assets/mochi/svg/mochi_laughing_svg.svg
+    - assets/mochi/svg/mochi_normal_svg.svg
+    - assets/mochi/svg/mochi_scared_svg.svg
+    - assets/mochi/svg/mochi_tired_svg.svg
+    - assets/foods/svg/dango.svg
+    - assets/foods/svg/matcha_tea.svg
+    - assets/foods/svg/onigiri.svg
+    - assets/foods/svg/ramen.svg
+    - assets/foods/svg/strawberry_daifuku.svg
 
   fonts:
     - family: Pixelify Sans

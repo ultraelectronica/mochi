@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "flutter analyze": "allow",
+      "flutter test": "allow",
+      "flutter test *": "allow",
+      "flutter pub *": "allow",
+      "dart *": "allow",
+      "pnpm test": "allow",
+      "pnpm test *": "allow",
+      "node --experimental-strip-types *": "allow",
+      "git status": "allow",
+      "git diff*": "allow",
+      "git log *": "allow",
+      "graphify query *": "allow",
+      "graphify path *": "allow",
+      "graphify explain *": "allow",
+      "graphify hook status": "allow"
+    }
+  }
+}
