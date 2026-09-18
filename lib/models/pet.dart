@@ -83,6 +83,7 @@ class Pet {
     required this.xp,
     required this.mood,
     required this.moodScore,
+    this.satiety = 70,
     this.lastInteractionAt,
     this.createdAt,
   });
@@ -95,6 +96,7 @@ class Pet {
       xp: _asInt(json['total_xp']),
       mood: mochiMoodFromString(json['mood'] as String? ?? 'normal'),
       moodScore: _asInt(json['mood_score']),
+      satiety: _asInt(json['satiety']),
       lastInteractionAt: _parseDateTime(json['last_interaction_at']),
       createdAt: _parseDateTime(json['created_at']),
     );
@@ -106,12 +108,19 @@ class Pet {
   final int xp;
   final MochiMood mood;
   final int moodScore;
+  final int satiety;
   final DateTime? lastInteractionAt;
   final DateTime? createdAt;
 
   PetStage get stage => petStageFromNumber(stageNumber);
 
   PetStage? get nextStage => nextPetStage(stage);
+
+  String get hungerLabel => switch (satiety) {
+    >= 70 => 'full',
+    >= 30 => 'a little peckish',
+    _ => 'very hungry',
+  };
 
   int get nextStageXp {
     final PetStage? next = nextStage;
@@ -139,6 +148,7 @@ class Pet {
     int? xp,
     MochiMood? mood,
     int? moodScore,
+    int? satiety,
     DateTime? lastInteractionAt,
     DateTime? createdAt,
   }) {
@@ -149,6 +159,7 @@ class Pet {
       xp: xp ?? this.xp,
       mood: mood ?? this.mood,
       moodScore: moodScore ?? this.moodScore,
+      satiety: satiety ?? this.satiety,
       lastInteractionAt: lastInteractionAt ?? this.lastInteractionAt,
       createdAt: createdAt ?? this.createdAt,
     );
@@ -237,6 +248,8 @@ class ActivityEntry {
           '${memberName ?? 'Family'} checked in as ${_titleFromMoodDetail(detail)}',
         'stage_up' => detail,
         'pet_tap' => '${memberName ?? 'Family'} petted Mochi',
+        'feed' =>
+          '${memberName ?? 'Family'} fed Mochi ${json['food_label'] ?? 'a snack'}',
         _ => '${memberName ?? 'Family'} chatted with Mochi',
       },
       detail: switch (eventType) {
@@ -244,6 +257,7 @@ class ActivityEntry {
         'stage_up' =>
           'A new life stage unlocked richer memories and reactions.',
         'pet_tap' => 'Mochi bounced happily from a tiny tap.',
+        'feed' => 'Satiety rose and Mochi wiggled with joy.',
         _ => detail.isEmpty ? 'A new conversation turn was added.' : detail,
       },
       timestamp: _formatRelative(createdAt),
@@ -253,12 +267,14 @@ class ActivityEntry {
         ).color.withValues(alpha: 0.28),
         'stage_up' => const Color(0xFFFFF0B5),
         'pet_tap' => const Color(0xFFFFE0EC),
+        'feed' => const Color(0xFFFFE8CC),
         _ => const Color(0xFFD8F0FF),
       },
       icon: switch (eventType) {
         'mood_checkin' => Icons.favorite_rounded,
         'stage_up' => Icons.auto_awesome_rounded,
         'pet_tap' => Icons.front_hand_rounded,
+        'feed' => Icons.restaurant_rounded,
         _ => Icons.chat_bubble_rounded,
       },
     );

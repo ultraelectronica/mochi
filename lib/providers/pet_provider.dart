@@ -7,6 +7,7 @@ import '../config/game_config.dart';
 import '../db/mochi_db.dart';
 import '../db/mochi_repository.dart';
 import '../models/chat_session.dart';
+import '../models/food.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
@@ -247,6 +248,7 @@ class PetProvider extends ChangeNotifier {
         relevant: relevant,
         bio: member.bio,
         birthdate: member.birthdate,
+        hungerLine: _hungerLineFor(pet),
         think: _thinkEnabled,
       );
 
@@ -406,6 +408,40 @@ class PetProvider extends ChangeNotifier {
     final int xpAwarded = _repo.tapPet(memberId: member.id);
     await _reloadLocal(includeChat: false);
     return xpAwarded;
+  }
+
+  int feedCooldownRemaining(int memberId) {
+    return _repo.feedCooldownRemainingSeconds(memberId: memberId);
+  }
+
+  Future<FeedResult> feed(Food food) async {
+    final FeedResult result = _repo.feedPet(memberId: _profile!.id, food: food);
+    await _reloadLocal(includeChat: false);
+    return result;
+  }
+
+  /// Prompt line describing current hunger and the last meal, so Mochi can
+  /// talk about food naturally.
+  String _hungerLineFor(Pet pet) {
+    final ({Food food, DateTime createdAt})? last = _repo.lastMeal();
+    final String lastPart = last == null
+        ? ''
+        : ' Last meal: ${last.food.label} ${_relativeShort(last.createdAt)} ago.';
+    return 'Hunger: ${pet.hungerLabel}.$lastPart';
+  }
+
+  static String _relativeShort(DateTime value) {
+    final Duration delta = DateTime.now().difference(value);
+    if (delta.inMinutes < 1) {
+      return 'just now';
+    }
+    if (delta.inMinutes < 60) {
+      return '${delta.inMinutes}m';
+    }
+    if (delta.inHours < 48) {
+      return '${delta.inHours}h';
+    }
+    return '${delta.inDays}d';
   }
 
   Future<void> addMemory({required String content, int weight = 1}) async {
