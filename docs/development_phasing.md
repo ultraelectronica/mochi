@@ -110,6 +110,7 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
   - [ ] Richer motion (transitions, optional frame sequences, effects).
 - [ ] **Daily engagement**
   - [x] Mood decay job + check-in flow.
+  - [x] Mini-games (Snack Catch / Tickle Pop / Mood Match) feeding XP, mood, and satiety — see [mini-games.md](mini-games.md).
   - [ ] Push or local notifications; scheduled nudges; “milestone notifications” backed by real notifications *(toggle is in-memory today).*
 
 ---
