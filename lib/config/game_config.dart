@@ -8,6 +8,16 @@ class GameConfig {
   static const int tapCooldownSeconds = 10;
   static const double moodDecayHours = 12;
 
+  // Mini-games stay a side dish: below chat XP, capped per run and per day.
+  static const int xpPerMiniGameMax = 8;
+  static const int miniGameDailyCap = 5;
+  static const int miniGameCooldownSeconds = 90;
+  static const int snackCatchDurationSeconds = 60;
+  static const int snackCatchLives = 3;
+  static const int ticklePopDurationSeconds = 30;
+  static const int moodMatchParMoves = 10;
+  static const int moodMatchSeconds = 90;
+
   static const int satietyMax = 100;
   static const int satietyDefault = 70;
   static const double satietyDecayPerHour = 4;
