@@ -8,6 +8,13 @@ class GameConfig {
   static const int tapCooldownSeconds = 10;
   static const double moodDecayHours = 12;
 
+  static const int satietyMax = 100;
+  static const int satietyDefault = 70;
+  static const double satietyDecayPerHour = 4;
+  static const int hungrySatietyThreshold = 25;
+  static const int fullSatietyThreshold = 90;
+  static const int feedCooldownMinutes = 30;
+
   static const int maxMemoriesPerMember = 12;
   static const int memoryPruneDays = 30;
   static const int maxBioLength = 500;
