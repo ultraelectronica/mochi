@@ -36,6 +36,35 @@ void main() {
       expect(system, contains('Never prefix your reply'));
     });
 
+    test('system prompt grounds the member as the user, not Mochi', () {
+      final String system = PromptBuilder.buildMessages(
+        memberName: 'Sam',
+        text: 'who am I?',
+        mood: MochiMood.normal,
+        memories: <String>[],
+      ).first.content;
+
+      expect(system, contains('the human who takes care of you'));
+      expect(
+        system,
+        contains('When Sam says "I", "me", or "my", it always means Sam'),
+      );
+      expect(system, contains('answer in second person'));
+      expect(system, contains('Never say "I am Sam"'));
+    });
+
+    test('system prompt scopes Mochi to pet behavior, deflecting academics', () {
+      final String system = PromptBuilder.buildMessages(
+        memberName: 'Sam',
+        text: 'give me a linear algebra example',
+        mood: MochiMood.normal,
+        memories: <String>[],
+      ).first.content;
+
+      expect(system, contains('not a calculator, tutor, or search engine'));
+      expect(system, contains('beyond your little paws'));
+    });
+
     test('empty memories produce the fallback block', () {
       final String system = PromptBuilder.buildMessages(
         memberName: 'Sam',
