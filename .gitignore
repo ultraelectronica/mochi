@@ -53,3 +53,6 @@ app.*.map.json
 
 # graphify knowledge graph (machine-local, rebuilt via hook / graphify --update)
 /graphify-out/
+
+# Local credentials scratch file — never commit
+accounts.txt
