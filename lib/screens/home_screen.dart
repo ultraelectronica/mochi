@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
+import '../config/game_config.dart';
+import '../models/food.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
 import '../providers/member_provider.dart';
 import '../providers/pet_provider.dart';
 import '../widgets/member_avatar.dart';
+import '../widgets/mochi_toast.dart';
 import '../widgets/pet_sprite.dart';
 import '../widgets/mochi_bottom_nav_bar.dart';
 import '../widgets/xp_bar.dart';
@@ -149,6 +152,17 @@ class _HeroPanelState extends State<_HeroPanel> {
     }
   }
 
+  Future<void> _openFoodSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext sheetContext) => _FoodSheet(
+        petProvider: widget.petProvider,
+        memberId: widget.currentMember.id,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final Widget textBlock = Column(
@@ -202,7 +216,10 @@ class _HeroPanelState extends State<_HeroPanel> {
           spacing: 10,
           runSpacing: 10,
           children: <Widget>[
-            const _MiniStatCard(label: 'Motion', value: 'Smooth'),
+            _MiniStatCard(
+              label: 'Satiety',
+              value: '${widget.pet.satiety}%',
+            ),
             _MiniStatCard(
               label: 'Affinity',
               value: '${widget.currentMember.affection}%',
@@ -211,10 +228,21 @@ class _HeroPanelState extends State<_HeroPanel> {
           ],
         ),
         const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: widget.onOpenChat,
-          icon: const Icon(Icons.chat_bubble_rounded),
-          label: const Text('Open Chat'),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: <Widget>[
+            FilledButton.icon(
+              onPressed: widget.onOpenChat,
+              icon: const Icon(Icons.chat_bubble_rounded),
+              label: const Text('Open Chat'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _openFoodSheet,
+              icon: const Icon(Icons.restaurant_rounded),
+              label: const Text('Feed Mochi'),
+            ),
+          ],
         ),
       ],
     );
@@ -359,6 +387,230 @@ class _FloatingXpState extends State<_FloatingXp>
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _FoodSheet extends StatelessWidget {
+  const _FoodSheet({required this.petProvider, required this.memberId});
+
+  final PetProvider petProvider;
+  final int memberId;
+
+  Future<void> _feed(BuildContext context, Food food) async {
+    final FeedResult result = await petProvider.feed(food);
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.of(context).pop();
+    switch (result.outcome) {
+      case FeedOutcome.success:
+        MochiToast.show(
+          title: 'Om nom nom',
+          message:
+              'Mochi loved the ${food.label}! '
+              '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%',
+          tone: MochiToastTone.success,
+          icon: Icons.restaurant_rounded,
+        );
+      case FeedOutcome.cooldown:
+        MochiToast.show(
+          message: 'Mochi is still nibbling. Try again in a few minutes.',
+          tone: MochiToastTone.warning,
+          icon: Icons.restaurant_rounded,
+        );
+      case FeedOutcome.full:
+        MochiToast.show(
+          message: 'Mochi is completely full right now.',
+          tone: MochiToastTone.info,
+          icon: Icons.restaurant_rounded,
+        );
+      case FeedOutcome.locked:
+        MochiToast.show(
+          message: 'That unlocks at ${food.unlockStage.label} stage.',
+          tone: MochiToastTone.info,
+          icon: Icons.lock_rounded,
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Pet pet = petProvider.pet;
+    final int cooldownSeconds = petProvider.feedCooldownRemaining(memberId);
+    final bool full = pet.satiety >= GameConfig.fullSatietyThreshold;
+
+    return Container(
+      decoration: pixelCardDecoration(MochiPalette.lightPink),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.78,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 4),
+            child: _PanelTitle(
+              title: 'Feed Mochi',
+              subtitle: full
+                  ? 'Satiety ${pet.satiety}% — Mochi is full. Digest first!'
+                  : 'Satiety ${pet.satiety}% — a snack raises satiety, mood, and XP.',
+            ),
+          ),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+              children: <Widget>[
+                for (final Food food in Food.values)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _FoodCard(
+                      food: food,
+                      pet: pet,
+                      cooldownSeconds: cooldownSeconds,
+                      onFeed: () => _feed(context, food),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FoodCard extends StatelessWidget {
+  const _FoodCard({
+    required this.food,
+    required this.pet,
+    required this.cooldownSeconds,
+    required this.onFeed,
+  });
+
+  final Food food;
+  final Pet pet;
+  final int cooldownSeconds;
+  final VoidCallback onFeed;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool locked =
+        petStageNumber(pet.stage) < petStageNumber(food.unlockStage);
+    final bool cooldown = cooldownSeconds > 0;
+    final bool full = pet.satiety >= GameConfig.fullSatietyThreshold;
+    final bool enabled = !locked && !cooldown && !full;
+
+    final String? lockHint = locked
+        ? 'Unlocks at ${food.unlockStage.label}'
+        : cooldown
+        ? 'Ready in ${_cooldownLabel(cooldownSeconds)}'
+        : full
+        ? 'Mochi is full'
+        : null;
+
+    return Opacity(
+      opacity: enabled ? 1 : 0.62,
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: MochiPalette.ink, width: 2),
+        ),
+        child: InkWell(
+          onTap: enabled ? onFeed : null,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 48,
+                  height: 48,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: MochiPalette.yellow.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: MochiPalette.ink, width: 2),
+                  ),
+                  child: Text(
+                    food.emoji,
+                    style: const TextStyle(fontSize: 24),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        food.label,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        lockHint ?? food.blurb,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          _FoodEffectChip(label: '+${food.satietyGain} satiety'),
+                          _FoodEffectChip(label: '+${food.moodGain} mood'),
+                          _FoodEffectChip(label: '+${food.xpAward} XP'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  locked
+                      ? Icons.lock_rounded
+                      : enabled
+                      ? Icons.restaurant_rounded
+                      : Icons.hourglass_top_rounded,
+                  color: MochiPalette.ink,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _cooldownLabel(int seconds) {
+    if (seconds <= 60) {
+      return '<1 min';
+    }
+    final int minutes = seconds ~/ 60;
+    return '$minutes min';
+  }
+}
+
+class _FoodEffectChip extends StatelessWidget {
+  const _FoodEffectChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: MochiPalette.mint.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: MochiPalette.ink, width: 1.5),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall,
       ),
     );
   }
