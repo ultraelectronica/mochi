@@ -10,12 +10,12 @@ Food foodFromString(String raw) {
 }
 
 extension FoodData on Food {
-  String get emoji => switch (this) {
-    Food.mochiBite => '🍡',
-    Food.strawberryDaifuku => '🍓',
-    Food.onigiri => '🍙',
-    Food.matchaTea => '🍵',
-    Food.ramen => '🍜',
+  String get asset => switch (this) {
+    Food.mochiBite => 'assets/foods/svg/dango.svg',
+    Food.strawberryDaifuku => 'assets/foods/svg/strawberry_daifuku.svg',
+    Food.onigiri => 'assets/foods/svg/onigiri.svg',
+    Food.matchaTea => 'assets/foods/svg/matcha_tea.svg',
+    Food.ramen => 'assets/foods/svg/ramen.svg',
   };
 
   String get label => switch (this) {
@@ -32,6 +32,14 @@ extension FoodData on Food {
     Food.onigiri => 'A hearty rice triangle. Solid and filling.',
     Food.matchaTea => 'A warm, calm sip. Cozy and gentle.',
     Food.ramen => 'A whole cozy feast for a growing Mochi.',
+  };
+
+  String get emoji => switch (this) {
+    Food.mochiBite => '🍡',
+    Food.strawberryDaifuku => '🍓',
+    Food.onigiri => '🍙',
+    Food.matchaTea => '🍵',
+    Food.ramen => '🍜',
   };
 
   int get satietyGain => switch (this) {
