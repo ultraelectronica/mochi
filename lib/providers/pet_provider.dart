@@ -14,6 +14,7 @@ import '../services/local_llm/llm_service.dart';
 import '../services/local_llm/local_models.dart';
 import '../services/local_llm/model_manager.dart';
 import '../services/local_llm/prompt_builder.dart';
+import '../services/local_llm/scope_guard.dart';
 import '../services/tts_service.dart';
 
 class PetProvider extends ChangeNotifier {
@@ -196,6 +197,17 @@ class PetProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      if (ScopeGuard.isOutOfScope(text)) {
+        await _commitReply(
+          member: member,
+          text: text,
+          reply: ScopeGuard.deflection(),
+          inputType: inputType,
+          reward: false,
+        );
+        return;
+      }
+
       LocalModel model = ModelManager.instance.selected;
       if (!await ModelManager.instance.isInstalled(model)) {
         throw const _LocalModelMissingException();
@@ -265,40 +277,12 @@ class PetProvider extends ChangeNotifier {
       );
       reply = rawReply ?? pet.mood.reaction;
 
-      final int sessionId =
-          _repo.resolveSession(memberId: member.id, requestedSessionId: _activeSessionId);
-      final int xpAwarded =
-          _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerChat);
-
-      _repo.insertInteraction(
-        memberId: member.id,
-        sessionId: sessionId,
-        inputText: text,
-        responseText: reply,
+      await _commitReply(
+        member: member,
+        text: text,
+        reply: reply,
         inputType: inputType,
-        xpAwarded: xpAwarded,
       );
-      _repo.deriveSessionTitle(sessionId, text);
-      _repo.touchSession(sessionId);
-      if (_shouldRemember(text)) {
-        _repo.upsertMemory(memberId: member.id, content: text);
-      }
-      _repo.checkStagePromotion();
-      _repo.recalculateMood();
-
-      _activeSessionId = sessionId;
-      if (_chatEntries.isNotEmpty) {
-        _chatEntries = _chatEntries.sublist(0, _chatEntries.length - 1);
-      }
-      _chatEntries = <ChatEntry>[
-        ..._chatEntries,
-        ChatEntry.local(author: 'Mochi', text: reply, isPet: true),
-      ];
-      _errorMessage = null;
-      await _reloadLocal();
-      if (_ttsEnabled && reply.isNotEmpty) {
-        unawaited(_ttsService.speak(reply));
-      }
     } on _LocalModelMissingException {
       if (_chatEntries.isNotEmpty) {
         _chatEntries = _chatEntries.sublist(0, _chatEntries.length - 1);
@@ -315,6 +299,53 @@ class PetProvider extends ChangeNotifier {
     } finally {
       _replyPending = false;
       notifyListeners();
+    }
+  }
+
+  /// Persists a finished Mochi reply: session, interaction log, mood, and UI.
+  /// Deflected turns pass [reward] as false — logged, but no XP and no
+  /// auto-memory, so out-of-scope questions can't feed the pet.
+  Future<void> _commitReply({
+    required Member member,
+    required String text,
+    required String reply,
+    required String inputType,
+    bool reward = true,
+  }) async {
+    final int sessionId =
+        _repo.resolveSession(memberId: member.id, requestedSessionId: _activeSessionId);
+    final int xpAwarded = reward
+        ? _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerChat)
+        : 0;
+
+    _repo.insertInteraction(
+      memberId: member.id,
+      sessionId: sessionId,
+      inputText: text,
+      responseText: reply,
+      inputType: inputType,
+      xpAwarded: xpAwarded,
+    );
+    _repo.deriveSessionTitle(sessionId, text);
+    _repo.touchSession(sessionId);
+    if (reward && _shouldRemember(text)) {
+      _repo.upsertMemory(memberId: member.id, content: text);
+    }
+    _repo.checkStagePromotion();
+    _repo.recalculateMood();
+
+    _activeSessionId = sessionId;
+    if (_chatEntries.isNotEmpty) {
+      _chatEntries = _chatEntries.sublist(0, _chatEntries.length - 1);
+    }
+    _chatEntries = <ChatEntry>[
+      ..._chatEntries,
+      ChatEntry.local(author: 'Mochi', text: reply, isPet: true),
+    ];
+    _errorMessage = null;
+    await _reloadLocal();
+    if (_ttsEnabled && reply.isNotEmpty) {
+      unawaited(_ttsService.speak(reply));
     }
   }
 
