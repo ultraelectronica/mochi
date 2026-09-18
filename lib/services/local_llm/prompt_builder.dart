@@ -27,6 +27,7 @@ class PromptBuilder {
     List<String> relevant = const <String>[],
     String? bio,
     DateTime? birthdate,
+    String? hungerLine,
     bool think = false,
   }) {
     final List<String> dedupedMemories = memories
@@ -61,12 +62,16 @@ class PromptBuilder {
         ? '- Deep think is on: silently reason about what $memberName feels and needs first, then send only the final short reply. Never show your reasoning.\n'
         : '';
 
+    final String hungerBlock = (hungerLine ?? '').trim().isEmpty
+        ? ''
+        : '${hungerLine!.trim()}\n';
+
     final String system = '''You are Mochi, a warm family companion pet. You are not a productivity assistant.
 You are chatting with $memberName, the human who takes care of you.
 $memberName is the user. When $memberName says "I", "me", or "my", it always means $memberName — never you, Mochi.
 ${identityBlock}Current mood: ${mood.label}.
 Mood note: ${mood.note}
-Rules:
+${hungerBlock}Rules:
 $thinkRule- Keep it short. 1 to 2 sentences max. Never exceed 200 characters.
 - Sound cozy, playful, and emotionally aware.
 - Speak directly. No stage directions, actions in parentheses, or narration.
