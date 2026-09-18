@@ -237,6 +237,24 @@ class MochiDb {
     }
     db.execute('CREATE INDEX IF NOT EXISTS members_birthdate_idx '
         'ON members (birthdate)');
+
+    final Set<String> petCols = db
+        .select('PRAGMA table_info(pets)')
+        .map((Row row) => row['name'] as String)
+        .toSet();
+    if (!petCols.contains('satiety')) {
+      db.execute(
+        'ALTER TABLE pets ADD COLUMN satiety INTEGER NOT NULL DEFAULT 70',
+      );
+    }
+    if (!petCols.contains('satiety_updated_at')) {
+      db.execute('ALTER TABLE pets ADD COLUMN satiety_updated_at TEXT');
+    }
+    // Stamp existing pets so pre-upgrade age does not count as hunger.
+    db.execute(
+      "UPDATE pets SET satiety_updated_at = "
+      "COALESCE(satiety_updated_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+    );
   }
 
   static void _runSchema(Database db) {
@@ -248,6 +266,8 @@ class MochiDb {
         total_xp INTEGER NOT NULL DEFAULT 0,
         mood TEXT NOT NULL DEFAULT 'normal',
         mood_score INTEGER NOT NULL DEFAULT 70,
+        satiety INTEGER NOT NULL DEFAULT 70,
+        satiety_updated_at TEXT,
         last_interaction_at TEXT,
         created_at TEXT NOT NULL
       );
@@ -309,6 +329,16 @@ class MochiDb {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS feedings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        food TEXT NOT NULL,
+        satiety_before INTEGER NOT NULL,
+        satiety_awarded INTEGER NOT NULL,
+        xp_awarded INTEGER NOT NULL DEFAULT 3,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS stage_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         stage INTEGER NOT NULL,
@@ -327,6 +357,8 @@ class MochiDb {
         ON mood_log (created_at);
       CREATE INDEX IF NOT EXISTS pet_taps_created_idx
         ON pet_taps (created_at);
+      CREATE INDEX IF NOT EXISTS feedings_created_idx
+        ON feedings (created_at);
       CREATE INDEX IF NOT EXISTS stage_events_created_idx
         ON stage_events (created_at);
     ''');

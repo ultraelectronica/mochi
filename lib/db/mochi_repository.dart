@@ -6,6 +6,7 @@ import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import '../config/game_config.dart';
 import '../models/chat_session.dart';
+import '../models/food.dart';
 import '../models/member.dart';
 import '../models/mood.dart';
 import '../models/pet.dart';
@@ -27,8 +28,9 @@ class MochiRepository {
 
   Pet createPet(String name) {
     _sql.execute(
-      'INSERT INTO pets (name, created_at) VALUES (?, ?)',
-      <Object?>[name, MochiDb.nowIso()],
+      'INSERT INTO pets (name, created_at, satiety_updated_at) '
+      'VALUES (?, ?, ?)',
+      <Object?>[name, MochiDb.nowIso(), MochiDb.nowIso()],
     );
     return getPet()!;
   }
@@ -374,6 +376,9 @@ class MochiRepository {
     } else if (inactivityHours >= GameConfig.moodDecayHours) {
       score = math.min(score, 42);
     }
+    if (pet.satiety <= GameConfig.hungrySatietyThreshold) {
+      score -= (GameConfig.hungrySatietyThreshold - pet.satiety) * 0.6;
+    }
     score = _clamp(score.round(), 0, 100).toDouble();
 
     final MochiMood mood = pickMood(
@@ -381,11 +386,13 @@ class MochiRepository {
       recentMoods,
       recentChats,
       inactivityHours,
+      satiety: pet.satiety,
     );
 
     _sql.execute(
-      'UPDATE pets SET mood = ?, mood_score = ?',
-      <Object?>[mood.name, score.round()],
+      'UPDATE pets SET mood = ?, mood_score = ?, satiety = ?, '
+      'satiety_updated_at = ?',
+      <Object?>[mood.name, score.round(), pet.satiety, MochiDb.nowIso()],
     );
     return mood.name;
   }
@@ -406,8 +413,12 @@ class MochiRepository {
     int score,
     List<String> recentMoods,
     int recentChats,
-    double inactivityHours,
-  ) {
+    double inactivityHours, {
+    int satiety = GameConfig.satietyMax,
+  }) {
+    if (satiety <= GameConfig.hungrySatietyThreshold) {
+      return MochiMood.hungry;
+    }
     if (inactivityHours >= GameConfig.moodDecayHours * 2) {
       return MochiMood.hungry;
     }
@@ -474,6 +485,84 @@ class MochiRepository {
     );
     checkStagePromotion();
     return xpAwarded;
+  }
+
+  // ---- Feeding -------------------------------------------------------------
+
+  int feedCooldownRemainingSeconds({required int memberId}) {
+    final sqlite3.Row? last = _selectOne(
+      'SELECT created_at FROM feedings WHERE member_id = ? '
+      'ORDER BY created_at DESC LIMIT 1',
+      <Object?>[memberId],
+    );
+    if (last == null) {
+      return 0;
+    }
+    final DateTime? lastAt = DateTime.tryParse(
+      last['created_at'] as String,
+    )?.toUtc();
+    if (lastAt == null) {
+      return 0;
+    }
+    final int elapsed = DateTime.now().toUtc().difference(lastAt).inSeconds;
+    final int remaining =
+        GameConfig.feedCooldownMinutes * 60 - elapsed;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  /// Feeds the pet one item. Cooldown, stage gate, and fullness are checked
+  /// first; a success awards XP (mood-modified), raises satiety, bumps mood
+  /// score, and clears a hungry mood.
+  FeedResult feedPet({required int memberId, required Food food}) {
+    if (feedCooldownRemainingSeconds(memberId: memberId) > 0) {
+      return const FeedResult.cooldown();
+    }
+    final Pet pet = getPet()!;
+    if (petStageNumber(pet.stage) < petStageNumber(food.unlockStage)) {
+      return const FeedResult.locked();
+    }
+    final int satietyBefore = pet.satiety;
+    if (satietyBefore >= GameConfig.fullSatietyThreshold) {
+      return const FeedResult.full();
+    }
+
+    final int xpAwarded = awardXp(memberId: memberId, amount: food.xpAward);
+    final int satietyAfter = _clamp(
+      satietyBefore + food.satietyGain,
+      0,
+      GameConfig.satietyMax,
+    );
+    final String now = MochiDb.nowIso();
+    _sql.execute(
+      '''INSERT INTO feedings
+         (member_id, food, satiety_before, satiety_awarded, xp_awarded, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)''',
+      <Object?>[memberId, food.name, satietyBefore, food.satietyGain, xpAwarded, now],
+    );
+    _sql.execute(
+      '''UPDATE pets
+         SET satiety = ?,
+             satiety_updated_at = ?,
+             mood_score = MIN(mood_score + ?, 100),
+             mood = CASE WHEN mood = 'hungry' THEN 'happy' ELSE mood END''',
+      <Object?>[satietyAfter, now, food.moodGain],
+    );
+    checkStagePromotion();
+    return FeedResult.success(xpAwarded: xpAwarded, satietyAfter: satietyAfter);
+  }
+
+  /// Most recent meal, if the pet has ever been fed.
+  ({Food food, DateTime createdAt})? lastMeal() {
+    final sqlite3.Row? row = _selectOne(
+      'SELECT food, created_at FROM feedings ORDER BY created_at DESC LIMIT 1',
+    );
+    if (row == null) {
+      return null;
+    }
+    return (
+      food: foodFromString(row['food'] as String),
+      createdAt: _parseDate(row['created_at']),
+    );
   }
 
   // ---- Memories -----------------------------------------------------------
@@ -836,6 +925,25 @@ class MochiRepository {
       });
     }
 
+    for (final sqlite3.Row row
+        in _sql.select(
+          '''SELECT feedings.id, feedings.created_at, feedings.food,
+                    members.id AS member_id, members.name AS member_name
+             FROM feedings
+             JOIN members ON members.id = feedings.member_id
+             ORDER BY feedings.created_at DESC LIMIT ?''',
+          <Object?>[limit],
+        )) {
+      final Food food = foodFromString(row['food'] as String);
+      events.add(<String, dynamic>{
+        'event_type': 'feed',
+        'created_at': row['created_at'],
+        'member_name': row['member_name'],
+        'food_label': food.label,
+        'detail': 'fed Mochi ${food.label}',
+      });
+    }
+
     events.sort(
       (Map<String, dynamic> a, Map<String, dynamic> b) =>
           (b['created_at'] as String).compareTo(a['created_at'] as String),
@@ -857,9 +965,32 @@ class MochiRepository {
       xp: row['total_xp'] as int,
       mood: mochiMoodFromString(row['mood'] as String? ?? 'normal'),
       moodScore: row['mood_score'] as int,
+      satiety: _decayedSatiety(row),
       lastInteractionAt: _parseDateOrNull(row['last_interaction_at']),
       createdAt: _parseDate(row['created_at']),
     );
+  }
+
+  /// Satiety read with time decay applied since the last satiety write
+  /// (falls back to `created_at` for rows stamped before feeding existed).
+  static int _decayedSatiety(sqlite3.Row row) {
+    final int stored = row['satiety'] as int? ?? GameConfig.satietyDefault;
+    final String? stamped = row['satiety_updated_at'] as String?;
+    final String? created = row['created_at'] as String?;
+    final DateTime? baseline =
+        (DateTime.tryParse(stamped ?? '') ?? DateTime.tryParse(created ?? ''))
+            ?.toUtc();
+    if (baseline == null) {
+      return _clamp(stored, 0, GameConfig.satietyMax);
+    }
+    final double hours =
+        DateTime.now().toUtc().difference(baseline).inSeconds / 3600.0;
+    if (hours <= 0) {
+      return _clamp(stored, 0, GameConfig.satietyMax);
+    }
+    final int decayed =
+        (stored - hours * GameConfig.satietyDecayPerHour).floor();
+    return _clamp(decayed, 0, GameConfig.satietyMax);
   }
 
   Member _memberFromRow(sqlite3.Row row) {
