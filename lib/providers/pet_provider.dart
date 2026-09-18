@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/game_config.dart';
 import '../db/mochi_db.dart';
 import '../db/mochi_repository.dart';
+import '../games/mini_game.dart';
 import '../models/chat_session.dart';
 import '../models/food.dart';
 import '../models/member.dart';
@@ -416,6 +417,37 @@ class PetProvider extends ChangeNotifier {
 
   Future<FeedResult> feed(Food food) async {
     final FeedResult result = _repo.feedPet(memberId: _profile!.id, food: food);
+    await _reloadLocal(includeChat: false);
+    return result;
+  }
+
+  int miniGameCooldownRemaining() {
+    return _repo.miniGameCooldownRemainingSeconds(memberId: _profile!.id);
+  }
+
+  int dailyMiniGamePlays() {
+    return _repo.dailyMiniGamePlays(memberId: _profile!.id);
+  }
+
+  Map<MiniGame, int> miniGameBestScores() {
+    return _repo.miniGameBestScores(memberId: _profile!.id);
+  }
+
+  Future<MiniGameResult> playMiniGame({
+    required MiniGame game,
+    int score = 0,
+    int bestCombo = 0,
+    int moves = 0,
+    bool finished = true,
+  }) async {
+    final MiniGameResult result = _repo.recordMiniGamePlay(
+      memberId: _profile!.id,
+      game: game,
+      score: score,
+      bestCombo: bestCombo,
+      moves: moves,
+      finished: finished,
+    );
     await _reloadLocal(includeChat: false);
     return result;
   }
