@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mochi/config/game_config.dart';
 import 'package:mochi/db/mochi_db.dart';
 import 'package:mochi/db/mochi_repository.dart';
 import 'package:mochi/models/food.dart';
@@ -23,6 +22,10 @@ void main() {
   tearDown(() {
     db.db.close();
   });
+
+  void stock(Food food, [int amount = 1]) {
+    repo.addFood(memberId: profile.id, food: food, amount: amount);
+  }
 
   void setPet({
     int? stage,
@@ -60,6 +63,7 @@ void main() {
 
     test('success raises satiety, awards XP, and records the meal', () {
       setPet(stage: 2);
+      stock(Food.mochiBite);
 
       final FeedResult result = repo.feedPet(
         memberId: profile.id,
@@ -69,24 +73,49 @@ void main() {
       expect(result.outcome, FeedOutcome.success);
       expect(result.satietyAfter, 90);
       expect(result.xpAwarded, 3);
+      expect(result.foodRemaining, 0);
       expect(repo.getPet()!.satiety, 90);
       expect(repo.lastMeal()!.food, Food.mochiBite);
     });
 
-    test('second feed hits the cooldown', () {
+    test('refuses softly when the pantry has none left', () {
       setPet(stage: 2);
-      repo.feedPet(memberId: profile.id, food: Food.mochiBite);
 
       final FeedResult result = repo.feedPet(
         memberId: profile.id,
-        food: Food.onigiri,
+        food: Food.mochiBite,
       );
 
-      expect(result.outcome, FeedOutcome.cooldown);
-      expect(
-        repo.feedCooldownRemainingSeconds(memberId: profile.id),
-        inInclusiveRange(1, GameConfig.feedCooldownMinutes * 60),
+      expect(result.outcome, FeedOutcome.noFood);
+      expect(repo.getPet()!.satiety, 70);
+      expect(repo.getPet()!.xp, 0);
+      expect(repo.lastMeal(), isNull);
+    });
+
+    test('feeding consumes the item and reports what is left', () {
+      setPet(stage: 2);
+      stock(Food.matchaTea, 2);
+
+      final FeedResult first = repo.feedPet(
+        memberId: profile.id,
+        food: Food.matchaTea,
       );
+      expect(first.outcome, FeedOutcome.success);
+      expect(first.foodRemaining, 1);
+      expect(repo.foodInventory(memberId: profile.id)[Food.matchaTea], 1);
+
+      final FeedResult second = repo.feedPet(
+        memberId: profile.id,
+        food: Food.matchaTea,
+      );
+      expect(second.outcome, FeedOutcome.success);
+      expect(second.foodRemaining, 0);
+
+      final FeedResult third = repo.feedPet(
+        memberId: profile.id,
+        food: Food.matchaTea,
+      );
+      expect(third.outcome, FeedOutcome.noFood);
     });
 
     test('refuses softly when full', () {
@@ -110,6 +139,7 @@ void main() {
       );
 
       setPet(stage: 3);
+      stock(Food.ramen);
 
       expect(
         repo.feedPet(memberId: profile.id, food: Food.ramen).outcome,
@@ -119,6 +149,7 @@ void main() {
 
     test('satiety clamps at the max', () {
       setPet(stage: 2, satiety: 80);
+      stock(Food.onigiri);
 
       final FeedResult result = repo.feedPet(
         memberId: profile.id,
@@ -130,6 +161,7 @@ void main() {
 
     test('feeding clears a hungry mood', () {
       setPet(stage: 2, satiety: 20, mood: 'hungry');
+      stock(Food.strawberryDaifuku);
 
       repo.feedPet(memberId: profile.id, food: Food.strawberryDaifuku);
 
@@ -138,6 +170,7 @@ void main() {
 
     test('feed event lands in the activity feed', () {
       setPet(stage: 2);
+      stock(Food.mochiBite);
       repo.feedPet(memberId: profile.id, food: Food.mochiBite);
 
       expect(
