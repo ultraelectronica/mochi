@@ -252,6 +252,8 @@ class ActivityEntry {
           '${memberName ?? 'Family'} fed Mochi ${json['food_label'] ?? 'a snack'}',
         'mini_game' =>
           '${memberName ?? 'Family'} played ${json['game_label'] ?? 'a game'}',
+        'food_grant' =>
+          '${memberName ?? 'Family'} found ${json['food_label'] ?? 'a treat'}',
         _ => '${memberName ?? 'Family'} chatted with Mochi',
       },
       detail: switch (eventType) {
@@ -263,6 +265,12 @@ class ActivityEntry {
         'mini_game' => (json['xp_awarded'] as int? ?? 0) > 0
             ? 'Playtime together earned +${json['xp_awarded']} XP.'
             : 'Mochi enjoyed the company, no XP this time.',
+        'food_grant' => switch (json['source'] as String? ?? '') {
+          'chat' => 'A reward from a good chat — waiting in the pantry.',
+          'game' => 'A mini-game prize — waiting in the pantry.',
+          'checkIn' => "Today's check-in treat — waiting in the pantry.",
+          _ => 'A treat added to the pantry.',
+        },
         _ => detail.isEmpty ? 'A new conversation turn was added.' : detail,
       },
       timestamp: _formatRelative(createdAt),
@@ -274,6 +282,7 @@ class ActivityEntry {
         'pet_tap' => const Color(0xFFFFE0EC),
         'feed' => const Color(0xFFFFE8CC),
         'mini_game' => const Color(0xFFE4DDFF),
+        'food_grant' => const Color(0xFFFFF0C2),
         _ => const Color(0xFFD8F0FF),
       },
       icon: switch (eventType) {
@@ -282,6 +291,7 @@ class ActivityEntry {
         'pet_tap' => Icons.front_hand_rounded,
         'feed' => Icons.restaurant_rounded,
         'mini_game' => Icons.videogame_asset_rounded,
+        'food_grant' => Icons.card_giftcard_rounded,
         _ => Icons.chat_bubble_rounded,
       },
     );

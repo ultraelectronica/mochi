@@ -162,7 +162,6 @@ class _HeroPanelState extends State<_HeroPanel> {
       backgroundColor: Colors.transparent,
       builder: (BuildContext sheetContext) => _FoodSheet(
         petProvider: widget.petProvider,
-        memberId: widget.currentMember.id,
       ),
     );
   }
@@ -397,10 +396,9 @@ class _FloatingXpState extends State<_FloatingXp>
 }
 
 class _FoodSheet extends StatelessWidget {
-  const _FoodSheet({required this.petProvider, required this.memberId});
+  const _FoodSheet({required this.petProvider});
 
   final PetProvider petProvider;
-  final int memberId;
 
   Future<void> _feed(BuildContext context, Food food) async {
     final FeedResult result = await petProvider.feed(food);
@@ -410,19 +408,22 @@ class _FoodSheet extends StatelessWidget {
     Navigator.of(context).pop();
     switch (result.outcome) {
       case FeedOutcome.success:
+        final int? left = result.foodRemaining;
         MochiToast.show(
           title: 'Om nom nom',
           message:
               'Mochi loved the ${food.label}! '
-              '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%',
+              '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%'
+              '${left == null ? '' : ' · $left left'}',
           tone: MochiToastTone.success,
           icon: Icons.restaurant_rounded,
         );
-      case FeedOutcome.cooldown:
+      case FeedOutcome.noFood:
         MochiToast.show(
-          message: 'Mochi is still nibbling. Try again in a few minutes.',
-          tone: MochiToastTone.warning,
-          icon: Icons.restaurant_rounded,
+          message:
+              'No ${food.label} left. Chat or play with Mochi to earn more.',
+          tone: MochiToastTone.info,
+          icon: Icons.card_giftcard_rounded,
         );
       case FeedOutcome.full:
         MochiToast.show(
@@ -442,7 +443,7 @@ class _FoodSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Pet pet = petProvider.pet;
-    final int cooldownSeconds = petProvider.feedCooldownRemaining(memberId);
+    final Map<Food, int> pantry = petProvider.foodInventory();
     final bool full = pet.satiety >= GameConfig.fullSatietyThreshold;
 
     return Container(
@@ -460,7 +461,7 @@ class _FoodSheet extends StatelessWidget {
               title: 'Feed Mochi',
               subtitle: full
                   ? 'Satiety ${pet.satiety}% — Mochi is full. Digest first!'
-                  : 'Satiety ${pet.satiety}% — a snack raises satiety, mood, and XP.',
+                  : 'Satiety ${pet.satiety}% — snacks come from chats and games.',
             ),
           ),
           Flexible(
@@ -474,7 +475,7 @@ class _FoodSheet extends StatelessWidget {
                     child: _FoodCard(
                       food: food,
                       pet: pet,
-                      cooldownSeconds: cooldownSeconds,
+                      owned: pantry[food] ?? 0,
                       onFeed: () => _feed(context, food),
                     ),
                   ),
@@ -491,29 +492,28 @@ class _FoodCard extends StatelessWidget {
   const _FoodCard({
     required this.food,
     required this.pet,
-    required this.cooldownSeconds,
+    required this.owned,
     required this.onFeed,
   });
 
   final Food food;
   final Pet pet;
-  final int cooldownSeconds;
+  final int owned;
   final VoidCallback onFeed;
 
   @override
   Widget build(BuildContext context) {
     final bool locked =
         petStageNumber(pet.stage) < petStageNumber(food.unlockStage);
-    final bool cooldown = cooldownSeconds > 0;
     final bool full = pet.satiety >= GameConfig.fullSatietyThreshold;
-    final bool enabled = !locked && !cooldown && !full;
+    final bool enabled = !locked && !full && owned > 0;
 
     final String? lockHint = locked
         ? 'Unlocks at ${food.unlockStage.label}'
-        : cooldown
-        ? 'Ready in ${_cooldownLabel(cooldownSeconds)}'
         : full
         ? 'Mochi is full'
+        : owned <= 0
+        ? 'None left — earn more by chatting or playing'
         : null;
 
     return Opacity(
@@ -551,9 +551,19 @@ class _FoodCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(
-                        food.label,
-                        style: Theme.of(context).textTheme.titleMedium,
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              food.label,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
+                          Text(
+                            'x$owned',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -577,9 +587,11 @@ class _FoodCard extends StatelessWidget {
                 Icon(
                   locked
                       ? Icons.lock_rounded
-                      : enabled
+                      : full
+                      ? Icons.hourglass_top_rounded
+                      : owned > 0
                       ? Icons.restaurant_rounded
-                      : Icons.hourglass_top_rounded,
+                      : Icons.card_giftcard_rounded,
                   color: MochiPalette.ink,
                 ),
               ],
@@ -588,14 +600,6 @@ class _FoodCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  static String _cooldownLabel(int seconds) {
-    if (seconds <= 60) {
-      return '<1 min';
-    }
-    final int minutes = seconds ~/ 60;
-    return '$minutes min';
   }
 }
 

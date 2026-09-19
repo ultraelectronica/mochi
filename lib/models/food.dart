@@ -68,29 +68,46 @@ extension FoodData on Food {
 
   PetStage get unlockStage =>
       this == Food.ramen ? PetStage.pup : PetStage.hatchling;
+
+  /// Relative weight for random pantry drops; higher means more common.
+  int get dropWeight => switch (this) {
+    Food.mochiBite => 40,
+    Food.strawberryDaifuku => 20,
+    Food.onigiri => 20,
+    Food.matchaTea => 15,
+    Food.ramen => 5,
+  };
 }
 
-enum FeedOutcome { success, cooldown, full, locked }
+/// Where a pantry item came from — mirrors `food_grants.source`.
+enum FoodSource { starter, chat, game, checkIn }
+
+enum FeedOutcome { success, full, locked, noFood }
 
 class FeedResult {
   const FeedResult({
     required this.outcome,
     this.xpAwarded = 0,
     this.satietyAfter,
+    this.foodRemaining,
   });
 
-  const FeedResult.success({required this.xpAwarded, required this.satietyAfter})
-    : outcome = FeedOutcome.success;
-
-  const FeedResult.cooldown() : this(outcome: FeedOutcome.cooldown);
+  const FeedResult.success({
+    required this.xpAwarded,
+    required this.satietyAfter,
+    this.foodRemaining,
+  }) : outcome = FeedOutcome.success;
 
   const FeedResult.full() : this(outcome: FeedOutcome.full);
 
   const FeedResult.locked() : this(outcome: FeedOutcome.locked);
 
+  const FeedResult.noFood() : this(outcome: FeedOutcome.noFood);
+
   final FeedOutcome outcome;
   final int xpAwarded;
   final int? satietyAfter;
+  final int? foodRemaining;
 
   bool get success => outcome == FeedOutcome.success;
 }

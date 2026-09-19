@@ -339,6 +339,22 @@ class MochiDb {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS food_inventory (
+        member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        food TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (member_id, food)
+      );
+
+      CREATE TABLE IF NOT EXISTS food_grants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        food TEXT NOT NULL,
+        source TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS stage_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         stage INTEGER NOT NULL,
@@ -368,6 +384,10 @@ class MochiDb {
         ON pet_taps (created_at);
       CREATE INDEX IF NOT EXISTS feedings_created_idx
         ON feedings (created_at);
+      CREATE INDEX IF NOT EXISTS food_grants_created_idx
+        ON food_grants (created_at);
+      CREATE INDEX IF NOT EXISTS food_grants_source_idx
+        ON food_grants (member_id, source, created_at);
       CREATE INDEX IF NOT EXISTS stage_events_created_idx
         ON stage_events (created_at);
       CREATE INDEX IF NOT EXISTS mini_game_plays_created_idx

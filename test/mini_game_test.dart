@@ -16,6 +16,7 @@ void main() {
     repo = MochiRepository(db);
     repo.createPet('Mochi');
     profile = repo.createProfile('Sam', '#1D9E75');
+    db.db.execute('UPDATE pets SET stage = 2');
   });
 
   tearDown(() {
@@ -45,9 +46,32 @@ void main() {
     expect(result.outcome, MiniGameOutcome.rewarded);
     expect(result.xpAwarded, 6);
     expect(result.satietyAfter, isNotNull);
+    expect(result.foodAwarded, isNotNull);
+    expect(
+      repo.foodInventory(memberId: profile.id)[result.foodAwarded!],
+      1,
+    );
     expect(repo.getPet()!.xp, 6);
     expect(repo.miniGameBestScores(memberId: profile.id)[MiniGame.snackCatch], 100);
     expect(repo.dailyMiniGamePlays(memberId: profile.id), 1);
+  });
+
+  test('treats only drop once Mochi can eat them', () {
+    db.db.execute('UPDATE pets SET stage = 1');
+
+    final MiniGameResult result = repo.recordMiniGamePlay(
+      memberId: profile.id,
+      game: MiniGame.snackCatch,
+      score: 100,
+    );
+
+    expect(result.outcome, MiniGameOutcome.rewarded);
+    expect(result.foodAwarded, isNull);
+    expect(
+      repo.foodInventory(memberId: profile.id).values
+          .fold<int>(0, (int sum, int count) => sum + count),
+      0,
+    );
   });
 
   test('a second run hits the cooldown and earns nothing', () {
@@ -67,6 +91,7 @@ void main() {
 
     expect(second.outcome, MiniGameOutcome.cooldown);
     expect(second.xpAwarded, 0);
+    expect(second.foodAwarded, isNull);
     expect(repo.dailyMiniGamePlays(memberId: profile.id), 1);
   });
 
@@ -79,6 +104,7 @@ void main() {
         score: 100,
       );
       expect(result.outcome, MiniGameOutcome.rewarded);
+      expect(result.foodAwarded, isNotNull);
     }
     clearCooldown();
 
@@ -90,6 +116,12 @@ void main() {
 
     expect(capped.outcome, MiniGameOutcome.dailyCapReached);
     expect(capped.xpAwarded, 0);
+    expect(capped.foodAwarded, isNull);
+    expect(
+      repo.foodInventory(memberId: profile.id).values
+          .fold<int>(0, (int sum, int count) => sum + count),
+      GameConfig.miniGameDailyCap,
+    );
     expect(repo.dailyMiniGamePlays(memberId: profile.id), GameConfig.miniGameDailyCap);
   });
 

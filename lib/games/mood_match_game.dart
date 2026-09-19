@@ -259,7 +259,8 @@ class _MoodMatchGameState extends State<MoodMatchGame>
       return 'Saving the run...';
     }
     return switch (result.outcome) {
-      MiniGameOutcome.rewarded => '+${result.xpAwarded} XP · calm and cozy',
+      MiniGameOutcome.rewarded =>
+        '+${result.xpAwarded} XP · calm and cozy${result.foodSuffix}',
       MiniGameOutcome.dailyCapReached =>
         'Daily play bonus used up. Still fun though!',
       MiniGameOutcome.cooldown => 'On cooldown. No XP this time.',

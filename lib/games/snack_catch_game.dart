@@ -354,7 +354,8 @@ class _SnackCatchGameState extends State<SnackCatchGame>
     }
     return switch (result.outcome) {
       MiniGameOutcome.rewarded =>
-        '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%',
+        '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%'
+            '${result.foodSuffix}',
       MiniGameOutcome.dailyCapReached =>
         'Daily play bonus used up. Still fun though!',
       MiniGameOutcome.cooldown => 'On cooldown. No XP this time.',

@@ -109,8 +109,8 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
   - [x] Mood-based bob, tilt, asset selection.
   - [ ] Richer motion (transitions, optional frame sequences, effects).
 - [ ] **Daily engagement**
-  - [x] Mood decay job + check-in flow.
-  - [x] Mini-games (Snack Catch / Tickle Pop / Mood Match) feeding XP, mood, and satiety — see [mini-games.md](mini-games.md).
+  - [x] Mood decay job + check-in flow (first check-in of the day drops a pantry treat).
+  - [x] Mini-games (Snack Catch / Tickle Pop / Mood Match) feeding XP, mood, satiety, and pantry treats — see [mini-games.md](mini-games.md).
   - [ ] Push or local notifications; scheduled nudges; “milestone notifications” backed by real notifications *(toggle is in-memory today).*
 
 ---
