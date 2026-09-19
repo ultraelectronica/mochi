@@ -15,9 +15,11 @@ import '../models/pet.dart';
 import 'mochi_db.dart';
 
 class MochiRepository {
-  MochiRepository(this._db);
+  MochiRepository(this._db, {math.Random? random})
+    : _random = random ?? math.Random();
 
   final MochiDb _db;
+  final math.Random _random;
 
   sqlite3.Database get _sql => _db.db;
 
@@ -334,11 +336,13 @@ class MochiRepository {
     return row != null;
   }
 
-  void recordMoodCheckIn({required int memberId, required String mood}) {
+  /// Logs today's check-in and rolls the daily treat into the pantry.
+  Food? recordMoodCheckIn({required int memberId, required String mood}) {
     _sql.execute(
       'INSERT INTO mood_log (member_id, mood, created_at) VALUES (?, ?, ?)',
       <Object?>[memberId, mood, MochiDb.nowIso()],
     );
+    return rollFoodDrop(memberId: memberId, source: FoodSource.checkIn);
   }
 
   String recalculateMood() {
@@ -489,36 +493,154 @@ class MochiRepository {
     return xpAwarded;
   }
 
-  // ---- Feeding -------------------------------------------------------------
+  // ---- Feeding & pantry ----------------------------------------------------
 
-  int feedCooldownRemainingSeconds({required int memberId}) {
-    final sqlite3.Row? last = _selectOne(
-      'SELECT created_at FROM feedings WHERE member_id = ? '
-      'ORDER BY created_at DESC LIMIT 1',
+  /// Feedable items on hand for [memberId] (zero counts included).
+  Map<Food, int> foodInventory({required int memberId}) {
+    final Map<Food, int> counts = <Food, int>{
+      for (final Food food in Food.values) food: 0,
+    };
+    for (final sqlite3.Row row in _sql.select(
+      'SELECT food, count FROM food_inventory '
+      'WHERE member_id = ? AND count > 0',
       <Object?>[memberId],
-    );
-    if (last == null) {
-      return 0;
+    )) {
+      counts[foodFromString(row['food'] as String)] = row['count'] as int;
     }
-    final DateTime? lastAt = DateTime.tryParse(
-      last['created_at'] as String,
-    )?.toUtc();
-    if (lastAt == null) {
-      return 0;
-    }
-    final int elapsed = DateTime.now().toUtc().difference(lastAt).inSeconds;
-    final int remaining =
-        GameConfig.feedCooldownMinutes * 60 - elapsed;
-    return remaining > 0 ? remaining : 0;
+    return counts;
   }
 
-  /// Feeds the pet one item. Cooldown, stage gate, and fullness are checked
-  /// first; a success awards XP (mood-modified), raises satiety, bumps mood
-  /// score, and clears a hungry mood.
-  FeedResult feedPet({required int memberId, required Food food}) {
-    if (feedCooldownRemainingSeconds(memberId: memberId) > 0) {
-      return const FeedResult.cooldown();
+  /// Adds [amount] of a specific [food] — the starter pack and test seeding
+  /// path. Random drops go through [rollFoodDrop], which respects the caps.
+  void addFood({
+    required int memberId,
+    required Food food,
+    int amount = 1,
+    FoodSource source = FoodSource.starter,
+  }) {
+    final String now = MochiDb.nowIso();
+    _sql.execute(
+      '''INSERT INTO food_inventory (member_id, food, count, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(member_id, food)
+         DO UPDATE SET count = count + excluded.count,
+                       updated_at = excluded.updated_at''',
+      <Object?>[memberId, food.name, amount, now],
+    );
+    _sql.execute(
+      'INSERT INTO food_grants (member_id, food, source, created_at) '
+      'VALUES (?, ?, ?, ?)',
+      <Object?>[memberId, food.name, source.name, now],
+    );
+  }
+
+  /// One-time starter pantry so a save can feed Mochi on day one.
+  void grantStarterPack({required int memberId}) {
+    final int existing = _sql
+        .select(
+          'SELECT COUNT(*) AS count FROM food_grants '
+          'WHERE member_id = ? AND source = ?',
+          <Object?>[memberId, FoodSource.starter.name],
+        )
+        .single['count'] as int;
+    if (existing > 0) {
+      return;
     }
+    addFood(
+      memberId: memberId,
+      food: Food.mochiBite,
+      amount: GameConfig.starterMochiBites,
+    );
+    addFood(
+      memberId: memberId,
+      food: Food.onigiri,
+      amount: GameConfig.starterOnigiri,
+    );
+  }
+
+  /// Weighted random pantry drop for [source], capped per day. Returns the
+  /// granted food, or null when the source cap is hit or the pantry is full.
+  Food? rollFoodDrop({required int memberId, required FoodSource source}) {
+    if (_foodGrantsToday(memberId: memberId, source: source) >=
+        _dailyFoodCap(source)) {
+      return null;
+    }
+    final Food? food = _rollFood(memberId: memberId);
+    if (food == null) {
+      return null;
+    }
+    addFood(memberId: memberId, food: food, source: source);
+    return food;
+  }
+
+  /// Chat drop: one item per [GameConfig.chatFoodEveryN] rewarded messages
+  /// since the last chat drop, subject to the daily cap.
+  Food? claimChatFoodDrop({required int memberId}) {
+    final String lastDrop =
+        _selectOne(
+          'SELECT MAX(created_at) AS last FROM food_grants '
+          'WHERE member_id = ? AND source = ?',
+          <Object?>[memberId, FoodSource.chat.name],
+        )?['last'] as String? ??
+        '';
+    final int rewardedSince = _sql
+        .select(
+          '''SELECT COUNT(*) AS count FROM interactions
+             WHERE member_id = ? AND xp_awarded > 0 AND created_at > ?''',
+          <Object?>[memberId, lastDrop],
+        )
+        .single['count'] as int;
+    if (rewardedSince < GameConfig.chatFoodEveryN) {
+      return null;
+    }
+    return rollFoodDrop(memberId: memberId, source: FoodSource.chat);
+  }
+
+  int _foodGrantsToday({required int memberId, required FoodSource source}) {
+    return _sql
+        .select(
+          'SELECT COUNT(*) AS count FROM food_grants '
+          'WHERE member_id = ? AND source = ? AND created_at >= ?',
+          <Object?>[memberId, source.name, _dayStartUtc],
+        )
+        .single['count'] as int;
+  }
+
+  static int _dailyFoodCap(FoodSource source) => switch (source) {
+    FoodSource.starter => 0,
+    FoodSource.chat => GameConfig.chatFoodDailyCap,
+    FoodSource.game => GameConfig.gameFoodDailyCap,
+    FoodSource.checkIn => GameConfig.checkInFoodDailyCap,
+  };
+
+  /// Weighted pick over foods under the pantry cap and unlocked at the
+  /// current stage; null when nothing can fit.
+  Food? _rollFood({required int memberId}) {
+    final Map<Food, int> counts = foodInventory(memberId: memberId);
+    final int stage = petStageNumber(getPet()!.stage);
+    final List<Food> pool = <Food>[];
+    for (final Food food in Food.values) {
+      if ((counts[food] ?? 0) >= GameConfig.foodInventoryCap) {
+        continue;
+      }
+      if (stage < petStageNumber(food.unlockStage)) {
+        continue;
+      }
+      for (int i = 0; i < food.dropWeight; i++) {
+        pool.add(food);
+      }
+    }
+    if (pool.isEmpty) {
+      return null;
+    }
+    return pool[_random.nextInt(pool.length)];
+  }
+
+  /// Feeds the pet one item from the pantry. Stage gate, fullness, and stock
+  /// are checked first; a success consumes the item, awards XP
+  /// (mood-modified), raises satiety, bumps mood score, and clears a hungry
+  /// mood.
+  FeedResult feedPet({required int memberId, required Food food}) {
     final Pet pet = getPet()!;
     if (petStageNumber(pet.stage) < petStageNumber(food.unlockStage)) {
       return const FeedResult.locked();
@@ -527,14 +649,24 @@ class MochiRepository {
     if (satietyBefore >= GameConfig.fullSatietyThreshold) {
       return const FeedResult.full();
     }
+    final int stock = foodInventory(memberId: memberId)[food] ?? 0;
+    if (stock <= 0) {
+      return const FeedResult.noFood();
+    }
 
+    final String now = MochiDb.nowIso();
+    _sql.execute(
+      '''UPDATE food_inventory
+         SET count = count - 1, updated_at = ?
+         WHERE member_id = ? AND food = ? AND count > 0''',
+      <Object?>[now, memberId, food.name],
+    );
     final int xpAwarded = awardXp(memberId: memberId, amount: food.xpAward);
     final int satietyAfter = _clamp(
       satietyBefore + food.satietyGain,
       0,
       GameConfig.satietyMax,
     );
-    final String now = MochiDb.nowIso();
     _sql.execute(
       '''INSERT INTO feedings
          (member_id, food, satiety_before, satiety_awarded, xp_awarded, created_at)
@@ -550,7 +682,11 @@ class MochiRepository {
       <Object?>[satietyAfter, now, food.moodGain],
     );
     checkStagePromotion();
-    return FeedResult.success(xpAwarded: xpAwarded, satietyAfter: satietyAfter);
+    return FeedResult.success(
+      xpAwarded: xpAwarded,
+      satietyAfter: satietyAfter,
+      foodRemaining: stock - 1,
+    );
   }
 
   /// Most recent meal, if the pet has ever been fed.
@@ -677,12 +813,17 @@ class MochiRepository {
       game: game,
       score: score,
     );
+    final Food? foodAwarded = rollFoodDrop(
+      memberId: memberId,
+      source: FoodSource.game,
+    );
     checkStagePromotion();
     return MiniGameResult(
       outcome: MiniGameOutcome.rewarded,
       xpAwarded: xpAwarded,
       satietyAfter: satietyAfter,
       playsRemaining: playsRemaining - 1,
+      foodAwarded: foodAwarded,
     );
   }
 
@@ -1147,6 +1288,28 @@ class MochiRepository {
         'score': row['score'],
         'xp_awarded': row['xp_awarded'],
         'detail': 'played ${game.label}',
+      });
+    }
+
+    for (final sqlite3.Row row
+        in _sql.select(
+          '''SELECT food_grants.id, food_grants.created_at, food_grants.food,
+                    food_grants.source,
+                    members.id AS member_id, members.name AS member_name
+             FROM food_grants
+             JOIN members ON members.id = food_grants.member_id
+             WHERE food_grants.source != 'starter'
+             ORDER BY food_grants.created_at DESC LIMIT ?''',
+          <Object?>[limit],
+        )) {
+      final Food food = foodFromString(row['food'] as String);
+      events.add(<String, dynamic>{
+        'event_type': 'food_grant',
+        'created_at': row['created_at'],
+        'member_name': row['member_name'],
+        'food_label': food.label,
+        'source': row['source'],
+        'detail': 'found ${food.label}',
       });
     }
 
