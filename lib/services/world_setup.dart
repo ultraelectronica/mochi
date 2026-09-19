@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../db/mochi_db.dart';
 import '../db/mochi_repository.dart';
+import '../models/member.dart';
 
 /// One-time local world creation: the user profile and their pet.
 class WorldSetup {
@@ -18,8 +19,14 @@ class WorldSetup {
     final MochiRepository repo = MochiRepository(db);
     final String colorHex =
         '#${(avatarColor.toARGB32() & 0x00FFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
-    repo.createProfile(userName.trim(), colorHex, bio: bio, birthdate: birthdate);
+    final Member member = repo.createProfile(
+      userName.trim(),
+      colorHex,
+      bio: bio,
+      birthdate: birthdate,
+    );
     repo.createPet(petName.trim().isEmpty ? 'Mochi' : petName.trim());
+    repo.grantStarterPack(memberId: member.id);
     repo.touchProfileSeen(DateTime.now());
   }
 }

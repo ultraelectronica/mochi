@@ -34,6 +34,7 @@ class PetProvider extends ChangeNotifier {
   List<ActivityEntry> _feedEntries = <ActivityEntry>[];
   List<MemorySnippet> _memories = <MemorySnippet>[];
   Map<int, MochiMood> _memberCheckIns = <int, MochiMood>{};
+  Food? _pendingFoodDrop;
 
   bool _llamaOnline = false;
   bool _ttsEnabled = true;
@@ -103,6 +104,10 @@ class PetProvider extends ChangeNotifier {
     try {
       final MochiDb db = await MochiDb.instance();
       _repo = MochiRepository(db);
+      final Member? savedProfile = _repo.getProfile();
+      if (savedProfile != null && _repo.getPet() != null) {
+        _repo.grantStarterPack(memberId: savedProfile.id);
+      }
       _repo.pruneStaleMemories();
       await _reloadLocal();
       unawaited(_warmModel());
@@ -335,6 +340,9 @@ class PetProvider extends ChangeNotifier {
       _repo.upsertMemory(memberId: member.id, content: text);
     }
     _repo.checkStagePromotion();
+    if (reward) {
+      _pendingFoodDrop = _repo.claimChatFoodDrop(memberId: member.id);
+    }
     _repo.recalculateMood();
 
     _activeSessionId = sessionId;
@@ -393,7 +401,10 @@ class PetProvider extends ChangeNotifier {
     if (_repo.memberCheckedInToday(member.id)) {
       return false;
     }
-    _repo.recordMoodCheckIn(memberId: member.id, mood: mood.name);
+    _pendingFoodDrop = _repo.recordMoodCheckIn(
+      memberId: member.id,
+      mood: mood.name,
+    );
     _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerCheckin);
     _repo.checkStagePromotion();
     _repo.recalculateMood();
@@ -411,8 +422,16 @@ class PetProvider extends ChangeNotifier {
     return xpAwarded;
   }
 
-  int feedCooldownRemaining(int memberId) {
-    return _repo.feedCooldownRemainingSeconds(memberId: memberId);
+  Map<Food, int> foodInventory() {
+    return _repo.foodInventory(memberId: _profile!.id);
+  }
+
+  /// Treat earned by the last rewarded chat or check-in; the UI consumes it
+  /// once for a reward toast.
+  Food? consumePendingFoodDrop() {
+    final Food? food = _pendingFoodDrop;
+    _pendingFoodDrop = null;
+    return food;
   }
 
   Future<FeedResult> feed(Food food) async {
@@ -459,7 +478,20 @@ class PetProvider extends ChangeNotifier {
     final String lastPart = last == null
         ? ''
         : ' Last meal: ${last.food.label} ${_relativeShort(last.createdAt)} ago.';
-    return 'Hunger: ${pet.hungerLabel}.$lastPart';
+    return 'Hunger: ${pet.hungerLabel}.$lastPart '
+        'Pantry: ${_pantryLine()}.';
+  }
+
+  String _pantryLine() {
+    if (_profile == null) {
+      return 'empty';
+    }
+    final Map<Food, int> counts = _repo.foodInventory(memberId: _profile!.id);
+    final String items = counts.entries
+        .where((MapEntry<Food, int> entry) => entry.value > 0)
+        .map((MapEntry<Food, int> entry) => '${entry.value}x ${entry.key.label}')
+        .join(', ');
+    return items.isEmpty ? 'empty' : items;
   }
 
   static String _relativeShort(DateTime value) {
@@ -505,6 +537,7 @@ class PetProvider extends ChangeNotifier {
     _feedEntries = <ActivityEntry>[];
     _memories = <MemorySnippet>[];
     _memberCheckIns = <int, MochiMood>{};
+    _pendingFoodDrop = null;
     _replyPending = false;
     _errorMessage = null;
     _isLoading = false;

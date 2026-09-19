@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'config/app_config.dart';
+import 'models/food.dart';
 import 'models/member.dart';
 import 'models/mood.dart';
 import 'providers/member_provider.dart';
@@ -188,6 +189,18 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     MochiToast.show(title: title, message: message, tone: tone, icon: icon);
   }
 
+  void _showFoodDropToast(Food? food) {
+    if (food == null || !mounted) {
+      return;
+    }
+    _showToast(
+      'Found ${food.emoji} ${food.label}! It is in Mochi\'s pantry.',
+      title: 'Treat found',
+      tone: MochiToastTone.success,
+      icon: Icons.card_giftcard_rounded,
+    );
+  }
+
   Future<void> _handleSendMessage(
     String text, {
     String inputType = 'text',
@@ -200,6 +213,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         text: text,
         inputType: inputType,
       );
+      _showFoodDropToast(_petProvider.consumePendingFoodDrop());
     } catch (error) {
       if (mounted) {
         _showToast(
@@ -231,6 +245,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         }
         return false;
       }
+      _showFoodDropToast(_petProvider.consumePendingFoodDrop());
       return true;
     } catch (error) {
       if (mounted) {

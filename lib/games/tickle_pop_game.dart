@@ -273,7 +273,8 @@ class _TicklePopGameState extends State<TicklePopGame>
       return 'Saving the run...';
     }
     return switch (result.outcome) {
-      MiniGameOutcome.rewarded => '+${result.xpAwarded} XP · Mochi is delighted',
+      MiniGameOutcome.rewarded =>
+        '+${result.xpAwarded} XP · Mochi is delighted${result.foodSuffix}',
       MiniGameOutcome.dailyCapReached =>
         'Daily play bonus used up. Still fun though!',
       MiniGameOutcome.cooldown => 'On cooldown. No XP this time.',

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/food.dart';
+
 enum MiniGame { snackCatch, ticklePop, moodMatch }
 
 MiniGame miniGameFromString(String raw) {
@@ -43,12 +45,21 @@ class MiniGameResult {
     this.xpAwarded = 0,
     this.satietyAfter,
     this.playsRemaining = 0,
+    this.foodAwarded,
   });
 
   final MiniGameOutcome outcome;
   final int xpAwarded;
   final int? satietyAfter;
   final int playsRemaining;
+  final Food? foodAwarded;
 
   bool get rewarded => outcome == MiniGameOutcome.rewarded;
+}
+
+extension MiniGameResultData on MiniGameResult {
+  /// Result-card suffix for an earned pantry item, e.g. ` · +1 🍙 Onigiri`.
+  String get foodSuffix => foodAwarded == null
+      ? ''
+      : ' · +1 ${foodAwarded!.emoji} ${foodAwarded!.label}';
 }
