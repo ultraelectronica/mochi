@@ -19,6 +19,20 @@
 
 All three: big touch targets, quit button, pause-on-background overlay, consolation prize on loss, haptics, no shame states.
 
+Scored runs also roll one weighted pantry drop (see [Pantry drops](#pantry-drops)); the game-over card appends it to the reward line via `MiniGameResultData.foodSuffix`.
+
+### Pantry drops
+
+Feeding runs on earned stock (`food_inventory`), not a cooldown — snacks come from chatting, games, and the daily check-in.
+
+| Source | Rule | Daily cap |
+| --- | --- | --- |
+| Chat | 1 item per `chatFoodEveryN = 4` rewarded messages since the last chat drop | `chatFoodDailyCap = 3` |
+| Mini-game | 1 weighted drop per scored run | `gameFoodDailyCap = 5` |
+| Check-in | 1 weighted drop on the first check-in of the day | `checkInFoodDailyCap = 1` |
+
+Per-type stock caps at `foodInventoryCap = 9`; capped and stage-locked foods are skipped in the weighted roll (`Food.dropWeight`), so `ramen` only drops from Pup. A one-time starter pack (`starterMochiBites = 5` mochi bites + `starterOnigiri = 2` onigiri) seeds new saves.
+
 ### XP curve (pure function, mood modifier still applies via `awardXp`)
 
 | Game | Raw XP | Cap | Notes |
@@ -31,7 +45,8 @@ All three: big touch targets, quit button, pause-on-background overlay, consolat
 
 - **Daily cap:** 5 scored plays/day total across all games.
 - **Cooldown:** 90s between scored plays.
-- Over-cap / cooldown runs are still playable but award **0 XP** and only a tiny mood effect.
+- **Pantry:** one weighted drop per scored play, capped at 5/day (`gameFoodDailyCap`); drops stop when the pantry is full.
+- Over-cap / cooldown runs are still playable but award **0 XP**, no pantry drop, and only a tiny mood effect.
 - All awards route through `MochiRepository.awardXp` (`lib/db/mochi_repository.dart:262`), so `pet.mood.xpModifier` (`lib/models/mood.dart:86`), affection gain, `last_interaction_at`, and `checkStagePromotion()` stay single-sourced.
 
 ---
@@ -59,7 +74,8 @@ All three: big touch targets, quit button, pause-on-background overlay, consolat
   - cooldown check against last scored `mini_game_plays.created_at`
   - compute XP via `miniGameXpForScore`, then `awardXp`
   - apply per-game side-effects (satiety clamp, mood_score bump), then `checkStagePromotion()`
-  - returns `MiniGameResult {outcome, xpAwarded, satietyAfter, playsRemaining}`
+  - roll one weighted pantry drop (`rollFoodDrop(source: FoodSource.game)`), included in the result
+  - returns `MiniGameResult {outcome, xpAwarded, satietyAfter, playsRemaining, foodAwarded}`
 - [x] **Queries** — `dailyMiniGamePlays()`, `miniGameCooldownRemainingSeconds()`, `miniGameBestScores()`
 - [x] **Feed** `lib/models/pet.dart` — `mini_game` case in `ActivityEntry.fromJson` (title/detail/accent/icon) and emitted from `feed()`
 - [x] **Tests** `test/mini_game_test.dart` (new) — `MochiDb.openInMemory()`: XP recorded, daily cap blocks 6th play, cooldown blocks early re-play, best score updates, side-effects, feed entry
@@ -113,6 +129,7 @@ All three: big touch targets, quit button, pause-on-background overlay, consolat
 
 - [x] `flutter analyze`
 - [x] `flutter test`
+- [x] Pantry drops capped per source and per type — `test/food_reward_test.dart` + `test/mini_game_test.dart`
 - [ ] Manual: play each game to win and to lose; confirm consolation + no XP over cap
 - [ ] Manual: chat still yields 10 XP base and remains the primary growth path
 - [ ] Manual: affect detection — Snack Catch moves satiety, Tickle Pop moves mood, best scores persist across app restart
