@@ -1,18 +1,7 @@
-// Hallmark · macrostructure: Chat Workbench · tone: playful · anchor hue: pet-mood
-// pre-emit critique: P5 H5 E5 S5 R5 V4
-// redesign: chat screen rebuilt in Mochi's pixel-storybook language
-//   - extracted MochiPetAvatar helper, de-duped inline Member construction
-//   - empty state -> pixel intro (3 breathing swatches + avatar + prompt)
-//   - header trimmed: status dots + fullscreen icon, no collapse toggle
-//   - chat card accent shifts with pet.mood.tint (matches home hero pattern)
-//   - bubble grouping: meta row (author + timestamp) shows on first of a group
-//   - date chips between cross-day groups
-//   - typing indicator: pulsing pet avatar instead of generic dots
-//   - composer: dense row + "Listening..." pill when mic is active
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 
 import '../config/app_config.dart';
 import '../models/chat_session.dart';
@@ -34,6 +23,7 @@ class ChatScreen extends StatefulWidget {
     required this.onRefreshHistory,
     this.onToggleFullscreen,
     this.isFullscreen = false,
+    this.sttService,
   });
 
   final PetProvider petProvider;
@@ -42,6 +32,7 @@ class ChatScreen extends StatefulWidget {
   final Future<void> Function() onRefreshHistory;
   final VoidCallback? onToggleFullscreen;
   final bool isFullscreen;
+  final SttService? sttService;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -51,91 +42,230 @@ class _ChatScreenState extends State<ChatScreen>
     with SingleTickerProviderStateMixin {
   late final TextEditingController _controller;
   late final ScrollController _scrollController;
-  final SttService _stt = SttService();
+  late final SttService _stt;
   bool _isListening = false;
-  int _lastRenderedEntryCount = 0;
+  bool _micBusy = false;
+  bool _sending = false;
+  bool _voiceDraft = false;
+  bool _nearBottom = true;
+  bool _followLatest = true;
+  String? _failedDraft;
+  String _failedInputType = 'text';
+  String? _voiceError;
+  String? _lastRenderedText;
+  int? _lastSessionId;
+  final FocusNode _composerFocus = FocusNode();
   late final AnimationController _breath;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
-    _scrollController = ScrollController();
-    _stt.initialize();
+    _stt = widget.sttService ?? SttService();
+    _scrollController = ScrollController()..addListener(_onScroll);
+    _stt.onListeningChanged = (bool listening) {
+      if (mounted) setState(() => _isListening = listening);
+    };
     _breath = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
     )..repeat(reverse: true);
   }
 
-  @override
-  void didUpdateWidget(covariant ChatScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
+  void _onScroll() {
+    final bool nearBottom = _scrollController.position.extentAfter < 100;
+    if (_scrollController.position.userScrollDirection !=
+        ScrollDirection.idle) {
+      _followLatest = nearBottom;
+    }
+    if (nearBottom != _nearBottom && mounted) {
+      setState(() => _nearBottom = nearBottom);
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _composerFocus.dispose();
+    _stt.onListeningChanged = null;
     _stt.cancel();
     _breath.dispose();
     super.dispose();
   }
 
   void _scrollToEnd() {
-    if (!_scrollController.hasClients) {
+    if (!mounted || !_scrollController.hasClients) {
       return;
     }
-    _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent + 80,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-    );
+    _followLatest = true;
+    if (_scrollController.position.extentAfter < 1) return;
+    _scrollController
+        .animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        )
+        .then((_) {
+          if (mounted &&
+              _followLatest &&
+              _scrollController.hasClients &&
+              _scrollController.position.extentAfter > 1) {
+            WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+          }
+        });
   }
 
-  Future<void> _send({String inputType = 'text'}) async {
-    final String text = _controller.text.trim();
-    if (text.isEmpty || widget.petProvider.replyPending) {
+  Future<void> _send({String inputType = 'text', String? retryText}) async {
+    final String text = retryText ?? _controller.text.trim();
+    if (text.isEmpty ||
+        widget.petProvider.replyPending ||
+        _sending ||
+        _micBusy) {
       return;
     }
-    _controller.clear();
-    await widget.onSendMessage(text, inputType: inputType);
+    if (_isListening) await _stt.stopListening();
+    if (!mounted) return;
+    final String source = retryText == null && _voiceDraft
+        ? 'voice'
+        : inputType;
+    setState(() {
+      _sending = true;
+      _nearBottom = true;
+      _followLatest = true;
+      if (retryText == null) _voiceDraft = false;
+    });
+    if (retryText == null || _controller.text.trim() == retryText) {
+      _controller.clear();
+      _voiceDraft = false;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+    bool failed = false;
+    try {
+      await widget.onSendMessage(text, inputType: source);
+      failed = widget.petProvider.errorMessage != null;
+    } catch (_) {
+      failed = true;
+    } finally {
+      if (mounted) {
+        _failedDraft = failed ? text : null;
+        _failedInputType = source;
+        if (failed && _controller.text.isEmpty) {
+          _controller.text = text;
+          _voiceDraft = source == 'voice';
+        }
+        setState(() => _sending = false);
+      }
+    }
   }
 
   Future<void> _toggleMic() async {
-    if (_isListening) {
-      final String result = await _stt.stopListening();
-      setState(() {
-        _isListening = false;
-      });
-      final String text = result.trim();
-      if (text.isNotEmpty && !widget.petProvider.replyPending) {
-        _controller.text = text;
-        await _send(inputType: 'voice');
-      }
-      return;
-    }
-
-    final bool available = await _stt.initialize();
-    if (!available) {
-      return;
-    }
-
-    await _stt.startListening(
-      onResult: (String result) {
-        if (result.trim().isNotEmpty) {
-          setState(() {
-            _controller.text = result;
-          });
-        }
-      },
-    );
+    if (_micBusy || _sending) return;
     setState(() {
-      _isListening = true;
+      _micBusy = true;
+      _voiceError = null;
     });
+    try {
+      if (_isListening) {
+        await _stt.stopListening();
+      } else {
+        final bool available = await _stt.initialize();
+        if (!mounted) return;
+        if (!available) {
+          setState(
+            () => _voiceError =
+                'Voice input is unavailable. Check microphone and speech permissions in your phone settings, or type a message.',
+          );
+          return;
+        }
+        final String draft = _controller.text.trimRight();
+        _composerFocus.unfocus();
+        await _stt.startListening(
+          onResult: (String result) {
+            if (!mounted || result.trim().isEmpty) return;
+            final String text = '${draft.isEmpty ? '' : '$draft '}$result';
+            _controller.value = TextEditingValue(
+              text: text,
+              selection: TextSelection.collapsed(offset: text.length),
+            );
+            setState(() => _voiceDraft = true);
+          },
+          onError: (String message) {
+            if (mounted) setState(() => _voiceError = message);
+          },
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _voiceError =
+              'Voice input could not start. Try again or type your message.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _micBusy = false;
+          _isListening = _stt.isListening;
+        });
+      }
+    }
+  }
+
+  void _fillStarter(String text) {
+    _controller.text = text;
+    _controller.selection = TextSelection.collapsed(offset: text.length);
+    _composerFocus.requestFocus();
+  }
+
+  void _openOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext context) => SafeArea(
+        child: AnimatedBuilder(
+          animation: widget.petProvider,
+          builder: (BuildContext context, Widget? child) =>
+              SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Chat options',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                    SwitchListTile(
+                      title: const Text('Read replies aloud'),
+                      subtitle: const Text(
+                        'Hear Mochi’s replies on this device.',
+                      ),
+                      value: widget.petProvider.ttsEnabled,
+                      onChanged: widget.petProvider.setTtsEnabled,
+                    ),
+                    SwitchListTile(
+                      title: const Text('Deep think'),
+                      subtitle: const Text(
+                        'Give Mochi more time to ponder before replying.',
+                      ),
+                      value: widget.petProvider.thinkEnabled,
+                      onChanged: widget.petProvider.replyPending
+                          ? null
+                          : widget.petProvider.setThinkEnabled,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+        ),
+      ),
+    );
   }
 
   Future<void> _refreshHistory() async {
+    if (widget.petProvider.replyPending) return;
     await widget.onRefreshHistory();
   }
 
@@ -185,60 +315,93 @@ class _ChatScreenState extends State<ChatScreen>
   Widget build(BuildContext context) {
     final Pet pet = widget.petProvider.pet;
     final Member currentMember = widget.memberProvider.currentMember;
-    final int visibleEntryCount = _itemCount();
-
-    if (visibleEntryCount != _lastRenderedEntryCount) {
-      _lastRenderedEntryCount = visibleEntryCount;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+    final List<ChatEntry> entries = widget.petProvider.chatEntries;
+    final String renderedText =
+        '${entries.length}:${entries.isEmpty ? '' : entries.last.text}';
+    final bool sessionChanged =
+        _lastSessionId != widget.petProvider.activeSessionId;
+    _lastSessionId = widget.petProvider.activeSessionId;
+    if (renderedText != _lastRenderedText || sessionChanged) {
+      _lastRenderedText = renderedText;
+      if (entries.isNotEmpty && (_followLatest || sessionChanged)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToEnd());
+      }
     }
 
     return Column(
       children: <Widget>[
         Container(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-          decoration: pixelCardDecoration(pet.mood.color),
+          decoration: BoxDecoration(
+            color: MochiPalette.card,
+            borderRadius: BorderRadius.circular(20),
+          ),
           child: _ExpandedChatHeader(
             pet: pet,
-            serverOnline: widget.petProvider.serverOnline,
-            ttsEnabled: widget.petProvider.ttsEnabled,
             isFullscreen: widget.isFullscreen,
             onToggleFullscreen: widget.onToggleFullscreen,
             onOpenSessions: _openSessionsSheet,
+            onOpenOptions: _openOptions,
           ),
         ),
         const SizedBox(height: 6),
         Expanded(
           child: RepaintBoundary(
-            child: Container(
-              decoration: pixelCardDecoration(pet.mood.tint),
-              child: RefreshIndicator(
-                onRefresh: _refreshHistory,
-                child:
-                    widget.petProvider.chatEntries.isEmpty &&
-                        !widget.petProvider.replyPending
-                    ? ListView(
-                        controller: _scrollController,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
-                        children: <Widget>[
-                          _EmptyChatIntro(pet: pet, breath: _breath),
-                        ],
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                        itemCount: _itemCount(),
-                        itemBuilder: (BuildContext context, int index) {
-                          return _buildListItem(index, currentMember, pet);
-                        },
+            child: Stack(
+              children: <Widget>[
+                Positioned.fill(
+                  child: RefreshIndicator(
+                    onRefresh: _refreshHistory,
+                    child:
+                        widget.petProvider.chatEntries.isEmpty &&
+                            !widget.petProvider.replyPending
+                        ? ListView(
+                            controller: _scrollController,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+                            children: <Widget>[
+                              _EmptyChatIntro(
+                                pet: pet,
+                                onStarter: _fillStarter,
+                              ),
+                            ],
+                          )
+                        : ListView(
+                            controller: _scrollController,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                            children: <Widget>[
+                              for (int index = 0; index < _itemCount(); index++)
+                                _buildListItem(index, currentMember, pet),
+                            ],
+                          ),
+                  ),
+                ),
+                if (!_nearBottom && entries.isNotEmpty)
+                  Positioned(
+                    bottom: 8,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: FilledButton.icon(
+                        onPressed: _scrollToEnd,
+                        icon: const Icon(
+                          Icons.arrow_downward_rounded,
+                          size: 18,
+                        ),
+                        label: const Text('Jump to latest'),
                       ),
-              ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
         const SizedBox(height: 10),
-        if (widget.petProvider.errorMessage != null) ...<Widget>[
+        if (widget.petProvider.errorMessage != null ||
+            _failedDraft != null) ...<Widget>[
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -253,42 +416,54 @@ class _ChatScreenState extends State<ChatScreen>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    widget.petProvider.errorMessage!,
+                    widget.petProvider.errorMessage ??
+                        'Your message could not be sent. Your draft is saved; try again.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                 ),
                 const SizedBox(width: 6),
-                TextButton(
-                  onPressed: _refreshHistory,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
+                if (_failedDraft != null && !widget.petProvider.replyPending)
+                  TextButton(
+                    onPressed: _sending
+                        ? null
+                        : () => _send(
+                            retryText: _failedDraft,
+                            inputType: _failedInputType,
+                          ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      minimumSize: const Size(48, 48),
                     ),
-                    minimumSize: const Size(0, 0),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    child: const Text('Resend'),
                   ),
-                  child: const Text('Retry'),
-                ),
               ],
             ),
           ),
           const SizedBox(height: 10),
         ],
+        if (_voiceError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _voiceError!,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
         _Composer(
           controller: _controller,
+          focusNode: _composerFocus,
           isListening: _isListening,
-          micEnabled: _stt.isAvailable,
-          thinkEnabled: widget.petProvider.thinkEnabled,
-          replyPending: widget.petProvider.replyPending,
+          micEnabled: !_micBusy && !_sending,
+          replyPending: widget.petProvider.replyPending || _sending,
           onSend: _send,
           onToggleMic: _toggleMic,
-          onToggleThink: () => widget.petProvider.setThinkEnabled(
-            !widget.petProvider.thinkEnabled,
-          ),
         ),
         SizedBox(
-          height: widget.isFullscreen
+          height:
+              widget.isFullscreen || MediaQuery.viewInsetsOf(context).bottom > 0
               ? 14
               : MochiBottomNavBar.overlayPadding(context) + 24,
         ),
@@ -383,130 +558,79 @@ class _ChatScreenState extends State<ChatScreen>
 class _ExpandedChatHeader extends StatelessWidget {
   const _ExpandedChatHeader({
     required this.pet,
-    required this.serverOnline,
-    required this.ttsEnabled,
     required this.isFullscreen,
     required this.onToggleFullscreen,
     required this.onOpenSessions,
+    required this.onOpenOptions,
   });
 
   final Pet pet;
-  final bool serverOnline;
-  final bool ttsEnabled;
   final bool isFullscreen;
   final VoidCallback? onToggleFullscreen;
   final VoidCallback onOpenSessions;
+  final VoidCallback onOpenOptions;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final Widget actions = Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Row(
+        _IconAction(
+          icon: Icons.history_rounded,
+          tooltip: 'Chat history',
+          onPressed: onOpenSessions,
+        ),
+        if (onToggleFullscreen != null)
+          _IconAction(
+            icon: isFullscreen
+                ? Icons.close_fullscreen_rounded
+                : Icons.open_in_full_rounded,
+            tooltip: isFullscreen ? 'Exit fullscreen' : 'Fullscreen chat',
+            onPressed: onToggleFullscreen!,
+          ),
+        _IconAction(
+          icon: Icons.more_horiz_rounded,
+          tooltip: 'Chat options',
+          onPressed: onOpenOptions,
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool stacked =
+            constraints.maxWidth < 340 ||
+            MediaQuery.textScalerOf(context).scale(18) > 24;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            MochiPetAvatar(pet: pet, size: 28),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    'Chat with Mochi',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleMedium?.copyWith(fontSize: 14),
+            Row(
+              children: <Widget>[
+                MochiPetAvatar(pet: pet, size: 40),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        'Mochi',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      Text(
+                        'Feeling ${pet.mood.label.toLowerCase()}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
                   ),
-                  Text(
-                    '${pet.mood.label} tone \u00b7 short warm replies',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(fontSize: 12),
-                  ),
-                ],
-              ),
+                ),
+                if (!stacked) actions,
+              ],
             ),
-            _StatusDots(serverOnline: serverOnline, ttsEnabled: ttsEnabled),
-            const SizedBox(width: 4),
-            _IconAction(
-              icon: Icons.history_rounded,
-              tooltip: 'Chat history',
-              onPressed: onOpenSessions,
-            ),
-            if (onToggleFullscreen != null) ...<Widget>[
-              const SizedBox(width: 4),
-              _IconAction(
-                icon: isFullscreen
-                    ? Icons.close_fullscreen_rounded
-                    : Icons.open_in_full_rounded,
-                tooltip: isFullscreen ? 'Exit full' : 'Full screen',
-                onPressed: onToggleFullscreen!,
-              ),
-            ],
+            if (stacked)
+              Align(alignment: Alignment.centerRight, child: actions),
           ],
-        ),
-      ],
-    );
-  }
-}
-
-class _StatusDots extends StatelessWidget {
-  const _StatusDots({required this.serverOnline, required this.ttsEnabled});
-
-  final bool serverOnline;
-  final bool ttsEnabled;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _StatusDot(
-          color: serverOnline ? MochiPalette.mint : MochiPalette.peach,
-          tooltip: serverOnline
-              ? 'Chats save on this device'
-              : 'Unable to save',
-          icon: serverOnline
-              ? Icons.phone_android_rounded
-              : Icons.sync_problem_rounded,
-        ),
-        const SizedBox(width: 4),
-        _StatusDot(
-          color: ttsEnabled ? MochiPalette.lightPink : MochiPalette.cloudBlue,
-          tooltip: ttsEnabled ? 'Voice on' : 'Voice muted',
-          icon: ttsEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-        ),
-      ],
-    );
-  }
-}
-
-class _StatusDot extends StatelessWidget {
-  const _StatusDot({
-    required this.color,
-    required this.tooltip,
-    required this.icon,
-  });
-
-  final Color color;
-  final String tooltip;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        width: 22,
-        height: 22,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: MochiPalette.ink, width: 1.5),
-        ),
-        child: Icon(icon, size: 12, color: MochiPalette.ink),
-      ),
+        );
+      },
     );
   }
 }
@@ -524,24 +648,11 @@ class _IconAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      shape: const CircleBorder(
-        side: BorderSide(color: MochiPalette.ink, width: 1.5),
-      ),
-      child: InkWell(
-        onTap: onPressed,
-        customBorder: const CircleBorder(),
-        child: Tooltip(
-          message: tooltip,
-          child: Container(
-            width: 26,
-            height: 26,
-            alignment: Alignment.center,
-            child: Icon(icon, size: 14, color: MochiPalette.ink),
-          ),
-        ),
-      ),
+    return IconButton(
+      onPressed: onPressed,
+      tooltip: tooltip,
+      icon: Icon(icon, size: 22, color: MochiPalette.ink),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
     );
   }
 }
@@ -614,7 +725,7 @@ class _TypingAvatar extends StatelessWidget {
             border: Border.all(color: MochiPalette.ink, width: 2),
           ),
           child: Text(
-            '${mood.label.toLowerCase()} \u00b7 thinking',
+            'Mochi is thinking…',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: MochiPalette.ink.withValues(alpha: 0.7),
             ),
@@ -626,73 +737,58 @@ class _TypingAvatar extends StatelessWidget {
 }
 
 class _EmptyChatIntro extends StatelessWidget {
-  const _EmptyChatIntro({required this.pet, required this.breath});
+  const _EmptyChatIntro({required this.pet, required this.onStarter});
 
   final Pet pet;
-  final Animation<double> breath;
+  final ValueChanged<String> onStarter;
 
   @override
   Widget build(BuildContext context) {
-    final List<Color> swatch = <Color>[
-      MochiPalette.lightPink,
-      MochiPalette.cloudBlue,
-      MochiPalette.yellow,
-    ];
-
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List<Widget>.generate(swatch.length, (int i) {
-              return Padding(
-                padding: EdgeInsets.symmetric(horizontal: i == 1 ? 8 : 0),
-                child: AnimatedBuilder(
-                  animation: breath,
-                  builder: (BuildContext context, Widget? child) {
-                    final double phase =
-                        (breath.value + i / swatch.length) % 1.0;
-                    final double opacity = 0.55 + (0.45 * phase);
-                    return Opacity(opacity: opacity, child: child);
-                  },
-                  child: Container(
-                    width: 22,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: swatch[i],
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: MochiPalette.ink, width: 1.5),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 18),
           MochiPetAvatar(pet: pet, size: 72),
           const SizedBox(height: 14),
           Text(
-            'Mochi is listening',
+            'What’s on your mind?',
+            textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text(
-              'Send a tiny moment to begin the shared chat history.',
+              'A little joy, a tough day, or just a hello. Mochi is here.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 20),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              for (final String starter in <String>[
+                'Something good happened',
+                'I’ve had a tough day',
+                'Let’s chat',
+              ])
+                OutlinedButton(
+                  onPressed: () => onStarter(starter),
+                  child: Text(starter, textAlign: TextAlign.center),
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
           Text(
             'Everything stays on this phone.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               fontSize: 12,
-              color: MochiPalette.ink.withValues(alpha: 0.55),
+              color: MochiPalette.ink.withValues(alpha: 0.8),
             ),
           ),
         ],
@@ -704,158 +800,116 @@ class _EmptyChatIntro extends StatelessWidget {
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
+    required this.focusNode,
     required this.isListening,
     required this.micEnabled,
-    required this.thinkEnabled,
     required this.replyPending,
     required this.onSend,
     required this.onToggleMic,
-    required this.onToggleThink,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final bool isListening;
   final bool micEnabled;
-  final bool thinkEnabled;
   final bool replyPending;
   final Future<void> Function({String inputType}) onSend;
   final VoidCallback onToggleMic;
-  final VoidCallback onToggleThink;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      decoration: pixelCardDecoration(MochiPalette.yellow),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MochiPalette.card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: MochiPalette.ink, width: 2),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
+          TextField(
+            controller: controller,
+            focusNode: focusNode,
+            minLines: 1,
+            maxLines: 4,
+            readOnly: isListening,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.newline,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.5),
+            decoration: InputDecoration(
+              hintText: isListening ? 'Listening…' : 'Message Mochi…',
+              hintStyle: const TextStyle(color: Color(0xFF596177)),
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: 8,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => onSend(),
-                  decoration: InputDecoration(
-                    hintText: isListening
-                        ? 'Listening...'
-                        : 'Tell Mochi a tiny moment...',
-                    isDense: true,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                onPressed: onToggleThink,
-                icon: Icon(
-                  thinkEnabled
-                      ? Icons.psychology_rounded
-                      : Icons.psychology_alt_outlined,
-                ),
-                color: thinkEnabled ? MochiPalette.sky : null,
-                tooltip: thinkEnabled
-                    ? 'Deep think on \u00b7 Mochi ponders before replying'
-                    : 'Deep think off',
-                visualDensity: VisualDensity.compact,
-              ),
-              const SizedBox(width: 4),
               IconButton(
                 onPressed: micEnabled ? onToggleMic : null,
                 icon: Icon(
-                  isListening ? Icons.mic_rounded : Icons.mic_none_rounded,
+                  isListening ? Icons.stop_rounded : Icons.mic_none_rounded,
                 ),
-                color: isListening ? MochiPalette.lightPink : null,
-                tooltip: 'Voice input',
-                visualDensity: VisualDensity.compact,
+                color: MochiPalette.ink,
+                style: IconButton.styleFrom(
+                  backgroundColor: isListening
+                      ? MochiPalette.lightPink
+                      : MochiPalette.background,
+                  minimumSize: const Size(48, 48),
+                ),
+                tooltip: isListening
+                    ? 'Stop recording'
+                    : 'Record a voice draft',
               ),
-              const SizedBox(width: 4),
-              FilledButton.icon(
-                onPressed: replyPending ? null : onSend,
-                icon: const Icon(Icons.send_rounded, size: 16),
-                label: const Text('Send'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 13,
-                    fontFamily: 'Pixelify Sans',
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+              const SizedBox(width: 8),
+              const Spacer(),
+              const SizedBox(width: 8),
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: controller,
+                builder:
+                    (
+                      BuildContext context,
+                      TextEditingValue value,
+                      Widget? child,
+                    ) => FilledButton.icon(
+                      onPressed:
+                          replyPending ||
+                              isListening ||
+                              value.text.trim().isEmpty
+                          ? null
+                          : onSend,
+                      icon: const Icon(Icons.send_rounded, size: 18),
+                      label: const Text('Send'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
               ),
             ],
           ),
-          if (isListening) ...<Widget>[
-            const SizedBox(height: 8),
-            _ListeningPill(),
-          ],
+          if (isListening || replyPending)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                isListening
+                    ? 'Tap stop to review your voice draft.'
+                    : 'Mochi is replying. You can draft your next message.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
         ],
-      ),
-    );
-  }
-}
-
-class _ListeningPill extends StatefulWidget {
-  @override
-  State<_ListeningPill> createState() => _ListeningPillState();
-}
-
-class _ListeningPillState extends State<_ListeningPill>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat(reverse: true);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: MochiPalette.lightPink,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: MochiPalette.ink, width: 1.5),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (BuildContext context, Widget? child) {
-                final double scale = 0.7 + (_controller.value * 0.5);
-                return Transform.scale(scale: scale, child: child);
-              },
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: MochiPalette.ink,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Listening \u00b7 tap mic to stop',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontSize: 11,
-                color: MochiPalette.ink,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -890,6 +944,7 @@ class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
   }
 
   Future<void> _confirmDelete(ChatSession session) async {
+    if (widget.petProvider.replyPending) return;
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -1036,12 +1091,22 @@ class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
                     child: FilledButton.icon(
                       icon: const Icon(Icons.add_rounded, size: 18),
                       label: const Text('New chat'),
-                      onPressed: () {
-                        widget.petProvider.startNewSession();
-                        Navigator.of(context).pop();
-                      },
+                      onPressed: widget.petProvider.replyPending
+                          ? null
+                          : () {
+                              widget.petProvider.startNewSession();
+                              Navigator.of(context).pop();
+                            },
                     ),
                   ),
+                  if (widget.petProvider.replyPending)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'You can switch chats once Mochi finishes replying.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   Flexible(
                     child: sessions.isEmpty
@@ -1101,13 +1166,17 @@ class _ChatSessionsSheetState extends State<_ChatSessionsSheet> {
                                 return _SessionTile(
                                   session: session,
                                   isActive: session.id == activeId,
-                                  onSelect: () {
-                                    widget.petProvider
-                                        .selectSession(session.id)
-                                        .catchError((Object _) {});
-                                    Navigator.of(context).pop();
-                                  },
-                                  onDelete: () => _confirmDelete(session),
+                                  onSelect: widget.petProvider.replyPending
+                                      ? null
+                                      : () {
+                                          widget.petProvider
+                                              .selectSession(session.id)
+                                              .catchError((Object _) {});
+                                          Navigator.of(context).pop();
+                                        },
+                                  onDelete: widget.petProvider.replyPending
+                                      ? null
+                                      : () => _confirmDelete(session),
                                 );
                               },
                             ),
@@ -1133,8 +1202,8 @@ class _SessionTile extends StatelessWidget {
 
   final ChatSession session;
   final bool isActive;
-  final VoidCallback onSelect;
-  final VoidCallback onDelete;
+  final VoidCallback? onSelect;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
