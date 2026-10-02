@@ -189,13 +189,14 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
     MochiToast.show(title: title, message: message, tone: tone, icon: icon);
   }
 
-  void _showFoodDropToast(Food? food) {
-    if (food == null || !mounted) {
+  void _showFoodDropToast(List<Food> foods) {
+    if (foods.isEmpty || !mounted) {
       return;
     }
     _showToast(
-      'Found ${food.emoji} ${food.label}! It is in Mochi\'s pantry.',
-      title: 'Treat found',
+      'Found ${foods.map((food) => '${food.emoji} ${food.label}').join(' + ')}! '
+      '${foods.length == 1 ? 'It is' : 'They are'} in Mochi\'s pantry.',
+      title: foods.length == 1 ? 'Treat found' : 'Treats found',
       tone: MochiToastTone.success,
       icon: Icons.card_giftcard_rounded,
     );
@@ -213,7 +214,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         text: text,
         inputType: inputType,
       );
-      _showFoodDropToast(_petProvider.consumePendingFoodDrop());
+      _showFoodDropToast(_petProvider.consumePendingFoodDrops());
     } catch (error) {
       if (mounted) {
         _showToast(
@@ -245,7 +246,7 @@ class _MochiShellState extends State<MochiShell> with WidgetsBindingObserver {
         }
         return false;
       }
-      _showFoodDropToast(_petProvider.consumePendingFoodDrop());
+      _showFoodDropToast(_petProvider.consumePendingFoodDrops());
       return true;
     } catch (error) {
       if (mounted) {

@@ -20,7 +20,7 @@ extension MiniGameData on MiniGame {
 
   String get blurb => switch (this) {
     MiniGame.snackCatch => 'Catch falling snacks, dodge the trash.',
-    MiniGame.ticklePop => 'Pop bubbles around Mochi for combos.',
+    MiniGame.ticklePop => 'Move Mochi through bubbles for combos.',
     MiniGame.moodMatch => 'Flip mood pairs at a calm pace.',
   };
 
@@ -58,6 +58,12 @@ class MiniGameResult {
 }
 
 extension MiniGameResultData on MiniGameResult {
+  String get xpRestLine => switch (outcome) {
+    MiniGameOutcome.rewarded => '+$xpAwarded XP',
+    MiniGameOutcome.dailyCapReached => 'Daily XP bonus used up',
+    MiniGameOutcome.cooldown => 'XP is resting. No XP this time',
+  };
+
   /// Result-card suffix for an earned pantry item, e.g. ` · +1 🍙 Onigiri`.
   String get foodSuffix => foodAwarded == null
       ? ''

@@ -4,6 +4,7 @@ import 'package:mochi/db/mochi_db.dart';
 import 'package:mochi/db/mochi_repository.dart';
 import 'package:mochi/games/mini_game.dart';
 import 'package:mochi/models/member.dart';
+import 'package:mochi/models/food.dart';
 import 'package:mochi/models/pet.dart';
 
 void main() {
@@ -25,15 +26,9 @@ void main() {
 
   /// Backdates every recorded play so the 90s inter-play cooldown is clear.
   void clearCooldown() {
-    db.db.execute(
-      'UPDATE mini_game_plays SET created_at = ?',
-      <Object?>[
-        DateTime.now()
-            .toUtc()
-            .subtract(Duration(minutes: 10))
-            .toIso8601String(),
-      ],
-    );
+    db.db.execute('UPDATE mini_game_plays SET created_at = ?', <Object?>[
+      DateTime.now().toUtc().subtract(Duration(minutes: 10)).toIso8601String(),
+    ]);
   }
 
   test('records a scored run, awards XP, and updates best score', () {
@@ -47,12 +42,12 @@ void main() {
     expect(result.xpAwarded, 6);
     expect(result.satietyAfter, isNotNull);
     expect(result.foodAwarded, isNotNull);
-    expect(
-      repo.foodInventory(memberId: profile.id)[result.foodAwarded!],
-      1,
-    );
+    expect(repo.foodInventory(memberId: profile.id)[result.foodAwarded!], 1);
     expect(repo.getPet()!.xp, 6);
-    expect(repo.miniGameBestScores(memberId: profile.id)[MiniGame.snackCatch], 100);
+    expect(
+      repo.miniGameBestScores(memberId: profile.id)[MiniGame.snackCatch],
+      100,
+    );
     expect(repo.dailyMiniGamePlays(memberId: profile.id), 1);
   });
 
@@ -68,13 +63,15 @@ void main() {
     expect(result.outcome, MiniGameOutcome.rewarded);
     expect(result.foodAwarded, isNull);
     expect(
-      repo.foodInventory(memberId: profile.id).values
+      repo
+          .foodInventory(memberId: profile.id)
+          .values
           .fold<int>(0, (int sum, int count) => sum + count),
       0,
     );
   });
 
-  test('a second run hits the cooldown and earns nothing', () {
+  test('a second run hits the XP cooldown but still earns food', () {
     repo.recordMiniGamePlay(
       memberId: profile.id,
       game: MiniGame.ticklePop,
@@ -91,7 +88,11 @@ void main() {
 
     expect(second.outcome, MiniGameOutcome.cooldown);
     expect(second.xpAwarded, 0);
-    expect(second.foodAwarded, isNull);
+    expect(second.foodAwarded, isNotNull);
+    expect(
+      repo.gameFoodRemaining(memberId: profile.id),
+      GameConfig.gameFoodDailyCap - 2,
+    );
     expect(repo.dailyMiniGamePlays(memberId: profile.id), 1);
   });
 
@@ -116,13 +117,91 @@ void main() {
 
     expect(capped.outcome, MiniGameOutcome.dailyCapReached);
     expect(capped.xpAwarded, 0);
-    expect(capped.foodAwarded, isNull);
+    expect(capped.foodAwarded, isNotNull);
     expect(
-      repo.foodInventory(memberId: profile.id).values
+      repo
+          .foodInventory(memberId: profile.id)
+          .values
           .fold<int>(0, (int sum, int count) => sum + count),
+      GameConfig.miniGameDailyCap + 1,
+    );
+    expect(
+      repo.dailyMiniGamePlays(memberId: profile.id),
       GameConfig.miniGameDailyCap,
     );
-    expect(repo.dailyMiniGamePlays(memberId: profile.id), GameConfig.miniGameDailyCap);
+  });
+
+  test('game food has its own daily cap and resets the next UTC day', () {
+    for (int i = 0; i < GameConfig.gameFoodDailyCap; i++) {
+      final MiniGameResult result = repo.recordMiniGamePlay(
+        memberId: profile.id,
+        game: MiniGame.ticklePop,
+        score: 0,
+      );
+      expect(result.foodAwarded, isNotNull);
+    }
+    expect(repo.gameFoodRemaining(memberId: profile.id), 0);
+    expect(repo.dailyMiniGamePlays(memberId: profile.id), 1);
+    expect(
+      repo
+          .recordMiniGamePlay(memberId: profile.id, game: MiniGame.ticklePop)
+          .foodAwarded,
+      isNull,
+    );
+    db.db.execute('UPDATE food_grants SET created_at = ?', <Object?>[
+      DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 1))
+          .toIso8601String(),
+    ]);
+    expect(
+      repo.gameFoodRemaining(memberId: profile.id),
+      GameConfig.gameFoodDailyCap,
+    );
+    expect(
+      repo
+          .recordMiniGamePlay(memberId: profile.id, game: MiniGame.ticklePop)
+          .foodAwarded,
+      isNotNull,
+    );
+  });
+
+  test('naturally ended low-score and lost runs receive food', () {
+    for (final MiniGame game in MiniGame.values) {
+      final MiniGameResult result = repo.recordMiniGamePlay(
+        memberId: profile.id,
+        game: game,
+        score: 0,
+        finished: false,
+      );
+      expect(result.foodAwarded, isNotNull);
+    }
+  });
+
+  test('a full pantry does not spend the game food allowance', () {
+    for (final Food food in Food.values) {
+      repo.addFood(
+        memberId: profile.id,
+        food: food,
+        amount: GameConfig.foodInventoryCap,
+      );
+    }
+    final MiniGameResult full = repo.recordMiniGamePlay(
+      memberId: profile.id,
+      game: MiniGame.ticklePop,
+    );
+    expect(full.foodAwarded, isNull);
+    expect(
+      repo.gameFoodRemaining(memberId: profile.id),
+      GameConfig.gameFoodDailyCap,
+    );
+    db.db.execute('UPDATE food_inventory SET count = 0');
+    final MiniGameResult replay = repo.recordMiniGamePlay(
+      memberId: profile.id,
+      game: MiniGame.ticklePop,
+    );
+    expect(replay.foodAwarded, isNotNull);
+    expect(replay.xpAwarded, 0);
   });
 
   test('snack catch raises satiety while tickle pop raises mood', () {
@@ -138,7 +217,9 @@ void main() {
     expect(catchResult.satietyAfter, 60);
 
     clearCooldown();
-    db.db.execute("UPDATE pets SET satiety = 50, mood = 'sad', mood_score = 60");
+    db.db.execute(
+      "UPDATE pets SET satiety = 50, mood = 'sad', mood_score = 60",
+    );
 
     repo.recordMiniGamePlay(
       memberId: profile.id,

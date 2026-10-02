@@ -10,12 +10,22 @@ class SttService {
   late final SpeechToText _engine;
   bool _initialized = false;
   String _lastResult = '';
+  void Function(bool listening)? onListeningChanged;
+  void Function(String message)? _onError;
 
   Future<bool> initialize() async {
     if (_initialized) {
       return _engine.isAvailable;
     }
-    _initialized = await _engine.initialize();
+    _initialized = await _engine.initialize(
+      onStatus: (_) => onListeningChanged?.call(_engine.isListening),
+      onError: (_) {
+        onListeningChanged?.call(false);
+        _onError?.call(
+          'Voice input stopped. Review your draft, or try recording again.',
+        );
+      },
+    );
     return _engine.isAvailable;
   }
 
@@ -28,6 +38,7 @@ class SttService {
   Future<void> startListening({
     String localeId = 'en_US',
     void Function(String result)? onResult,
+    void Function(String message)? onError,
   }) async {
     if (!_initialized) {
       await initialize();
@@ -36,6 +47,7 @@ class SttService {
       return;
     }
     _lastResult = '';
+    _onError = onError;
     await _engine.listen(
       localeId: localeId,
       onResult: (result) {
@@ -47,16 +59,19 @@ class SttService {
         listenMode: ListenMode.dictation,
       ),
     );
+    onListeningChanged?.call(_engine.isListening);
   }
 
   Future<String> stopListening() async {
     if (_engine.isListening) {
       await _engine.stop();
     }
+    onListeningChanged?.call(false);
     return _lastResult;
   }
 
   Future<void> cancel() async {
+    _onError = null;
     if (_engine.isListening) {
       await _engine.cancel();
     }

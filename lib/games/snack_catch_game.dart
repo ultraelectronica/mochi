@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../config/app_config.dart';
 import '../config/game_config.dart';
 import '../models/food.dart';
+import '../models/mood.dart';
 import '../providers/pet_provider.dart';
 import 'game_shell.dart';
 import 'mini_game.dart';
@@ -39,8 +40,8 @@ class _FallingItem {
 class _SnackCatchGameState extends State<SnackCatchGame>
     with WidgetsBindingObserver, GameLifecycle<SnackCatchGame> {
   static const double _itemSize = 42;
-  static const double _mochiHeight = 64;
-  static const double _mochiBottomGap = 8;
+  static const double _mochiHeight = 88;
+  static const double _mochiBottomGap = 28;
   static const List<String> _trash = <String>['🧦', '🗑️', '🪨'];
 
   final Random _random = Random();
@@ -49,6 +50,7 @@ class _SnackCatchGameState extends State<SnackCatchGame>
   Size _area = Size.zero;
   Timer? _ticker;
   Timer? _countdown;
+  Timer? _squashTimer;
   double _mochiX = 0;
   bool _mochiPlaced = false;
   double _spawnCooldown = 0.6;
@@ -59,16 +61,13 @@ class _SnackCatchGameState extends State<SnackCatchGame>
   bool _over = false;
   bool _squash = false;
   MiniGameResult? _result;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(const Duration(milliseconds: 16), _tick);
-    _countdown = Timer.periodic(const Duration(seconds: 1), _countDown);
-  }
+  String? _feedback;
+  double _feedbackTime = 0;
+  bool _hurt = false;
 
   @override
   void dispose() {
+    _squashTimer?.cancel();
     _ticker?.cancel();
     _countdown?.cancel();
     super.dispose();
@@ -82,7 +81,7 @@ class _SnackCatchGameState extends State<SnackCatchGame>
 
   @override
   void onGameResume() {
-    if (_over) {
+    if (_over || !gameActive) {
       return;
     }
     _ticker = Timer.periodic(const Duration(milliseconds: 16), _tick);
@@ -99,14 +98,18 @@ class _SnackCatchGameState extends State<SnackCatchGame>
     }
   }
 
-  double get _mochiWidth =>
-      _area.width == 0 ? 120 : min(130, _area.width * 0.3);
+  double get _mochiWidth => _mochiHeight;
 
   void _tick(Timer timer) {
-    if (_over || _area == Size.zero) {
+    if (_over || !gameActive || _area == Size.zero) {
       return;
     }
     const double dt = 0.016;
+    _feedbackTime = max(0, _feedbackTime - dt);
+    if (_feedbackTime == 0) {
+      _feedback = null;
+      _hurt = false;
+    }
     final double mochiTop = _area.height - _mochiHeight - _mochiBottomGap;
 
     _items.removeWhere((_FallingItem item) {
@@ -167,9 +170,13 @@ class _SnackCatchGameState extends State<SnackCatchGame>
     if (item.good) {
       _score += 10;
       _catches++;
+      _feedback = '+10';
+      _feedbackTime = 0.6;
+      _hurt = false;
       _squash = true;
       HapticFeedback.selectionClick();
-      Future<void>.delayed(const Duration(milliseconds: 130), () {
+      _squashTimer?.cancel();
+      _squashTimer = Timer(const Duration(milliseconds: 130), () {
         if (mounted) {
           setState(() => _squash = false);
         }
@@ -180,6 +187,10 @@ class _SnackCatchGameState extends State<SnackCatchGame>
   }
 
   void _loseLife() {
+    if (_over) return;
+    _feedback = 'Oops!';
+    _feedbackTime = 0.6;
+    _hurt = true;
     _lives--;
     HapticFeedback.mediumImpact();
     if (_lives <= 0) {
@@ -210,6 +221,7 @@ class _SnackCatchGameState extends State<SnackCatchGame>
   }
 
   void _reset() {
+    _squashTimer?.cancel();
     setState(() {
       _items.clear();
       _remaining = GameConfig.snackCatchDurationSeconds;
@@ -220,6 +232,9 @@ class _SnackCatchGameState extends State<SnackCatchGame>
       _result = null;
       _spawnCooldown = 0.6;
       _mochiPlaced = false;
+      _feedback = null;
+      _hurt = false;
+      _squash = false;
     });
     _ticker = Timer.periodic(const Duration(milliseconds: 16), _tick);
     _countdown = Timer.periodic(const Duration(seconds: 1), _countDown);
@@ -232,8 +247,14 @@ class _SnackCatchGameState extends State<SnackCatchGame>
       emoji: '🍡',
       accent: MochiPalette.peach,
       onQuit: () => Navigator.of(context).pop(),
-      hud: Row(
-        mainAxisSize: MainAxisSize.min,
+      pet: widget.petProvider.pet,
+      instructions:
+          'Drag Mochi left and right to catch snacks. Dodge the trash! You have three hearts and one minute.',
+      started: gameStarted,
+      onStart: startGame,
+      onPause: _over ? null : toggleGamePause,
+      hud: Wrap(
+        runSpacing: 6,
         children: <Widget>[
           GameHudPill(
             icon: Icons.timer_outlined,
@@ -245,10 +266,7 @@ class _SnackCatchGameState extends State<SnackCatchGame>
             label: '$_lives',
             color: MochiPalette.lightPink,
           ),
-          GameHudPill(
-            icon: Icons.stars_rounded,
-            label: '$_score',
-          ),
+          GameHudPill(icon: Icons.stars_rounded, label: '$_score'),
         ],
       ),
       child: LayoutBuilder(
@@ -258,13 +276,12 @@ class _SnackCatchGameState extends State<SnackCatchGame>
             _mochiX = (_area.width - _mochiWidth) / 2;
             _mochiPlaced = true;
           }
-          final double mochiTop =
-              _area.height - _mochiHeight - _mochiBottomGap;
+          final double mochiTop = _area.height - _mochiHeight - _mochiBottomGap;
 
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
             onHorizontalDragUpdate: (DragUpdateDetails details) {
-              if (_over) {
+              if (_over || !gameActive) {
                 return;
               }
               setState(() {
@@ -275,7 +292,7 @@ class _SnackCatchGameState extends State<SnackCatchGame>
               });
             },
             onTapDown: (TapDownDetails details) {
-              if (_over) {
+              if (_over || !gameActive) {
                 return;
               }
               setState(() {
@@ -287,17 +304,16 @@ class _SnackCatchGameState extends State<SnackCatchGame>
             },
             child: Stack(
               children: <Widget>[
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: <Color>[
-                          MochiPalette.cloudBlue.withValues(alpha: 0.45),
-                          Colors.white,
-                        ],
-                      ),
+                const Positioned.fill(child: GameScene(picnic: true)),
+                Positioned(
+                  top: 18,
+                  left: 16,
+                  right: 16,
+                  child: IgnorePointer(
+                    child: Text(
+                      'Catch snacks · dodge trash',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ),
                 ),
@@ -317,24 +333,45 @@ class _SnackCatchGameState extends State<SnackCatchGame>
                     width: _mochiWidth,
                     height: _mochiHeight,
                     child: Center(
-                      child: MochiGameBlob(
+                      child: MochiGameSprite(
                         size: _mochiHeight,
                         squash: _squash,
+                        pet: widget.petProvider.pet,
+                        mood: _hurt ? MochiMood.scared : MochiMood.happy,
                       ),
                     ),
                   ),
                 ),
+                if (_feedback != null)
+                  Positioned(
+                    left: _mochiX,
+                    top: mochiTop - 30,
+                    child: IgnorePointer(
+                      child: Text(
+                        _feedback!,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ),
                 if (gamePaused && !_over)
-                  const Positioned.fill(child: GamePausedOverlay()),
+                  Positioned.fill(
+                    child: GamePausedOverlay(onResume: toggleGamePause),
+                  ),
                 if (_over)
                   Positioned.fill(
                     child: GameResultCard(
+                      pet: widget.petProvider.pet,
+                      ready: _result != null,
                       emoji: '🍡',
-                      headline: _score >= 150 ? 'Snack champion!' : 'Playtime over',
+                      headline: _score >= 150
+                          ? 'Snack champion!'
+                          : 'Playtime over',
                       accent: MochiPalette.peach,
                       lines: <String>[
                         'Caught $_catches snacks · score $_score',
                         _rewardLine(_result),
+                        if (_result?.foodAwarded != null)
+                          '+1 ${_result!.foodAwarded!.emoji} ${_result!.foodAwarded!.label}',
                       ],
                       onReplay: _reset,
                       onDone: () => Navigator.of(context).pop(),
@@ -354,11 +391,9 @@ class _SnackCatchGameState extends State<SnackCatchGame>
     }
     return switch (result.outcome) {
       MiniGameOutcome.rewarded =>
-        '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%'
-            '${result.foodSuffix}',
-      MiniGameOutcome.dailyCapReached =>
-        'Daily play bonus used up. Still fun though!',
-      MiniGameOutcome.cooldown => 'On cooldown. No XP this time.',
+        '+${result.xpAwarded} XP · Satiety ${result.satietyAfter}%',
+      MiniGameOutcome.dailyCapReached ||
+      MiniGameOutcome.cooldown => result.xpRestLine,
     };
   }
 }

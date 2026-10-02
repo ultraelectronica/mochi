@@ -1,5 +1,8 @@
 # Mochi Mini-Games — Phasing & Tracking
 
+Food generosity rollout: [food-rewards.md](food-rewards.md) tracks the new pantry
+balance and separation of food rewards from game XP eligibility.
+
 > Tagline: **"Play with Mochi, not just chat."** — three offline mini-games (Snack Catch, Tickle Pop, Mood Match) that feed the existing XP / mood / satiety loop, all on-device with no new native deps.
 
 **Legends:** `[x]` done · `[ ]` todo · `[~]` in-progress
@@ -14,12 +17,20 @@
 | Game | Fantasy | Loop | Core skill | Side-effect |
 | --- | --- | --- | --- | --- |
 | **Snack Catch** | Feed Mochi | 60s, drag Mochi left/right, catch falling `Food.emoji`, dodge trash (`🧦`/`🗑️`). 3 misses ends early. | Hand-eye, speed ramp | Satiety `+min(12, score~/12)`, mood_score +4 |
-| **Tickle Pop** | Pet/affection | 30s, pop bubbles around Mochi, combo chained when pops <1.1s apart. No fail state. | Reflex, combos | Mood nudge toward `happy`/`laughing`, mood_score +6 |
-| **Mood Match** | Calm company | 4×3 grid of mood icons (6 pairs), flip pairs, par = 10 moves. Soft 90s ceiling. | Memory | No satiety change; flavor only |
+| **Tickle Pop** | Pet/affection | 30s, drag Mochi freely through bubbles, combo chained when pops <1.1s apart. No fail state. | Movement, combos | Mood nudge toward `happy`/`laughing`, mood_score +6 |
+| **Mood Match** | Calm company | 3/4-column grid of expressive Mochi cards (6 pairs), flip pairs, par = 10 moves. Soft 90s ceiling. | Memory | No satiety change; flavor only |
 
-All three: big touch targets, quit button, pause-on-background overlay, consolation prize on loss, haptics, no shame states.
+All three: stage-aware Mochi artwork, instructions and Start before timers run, separate stats header, quit button, manual pause/resume, and pause-on-background. Returning to the app waits for Resume. Consolation prizes, haptics, and no shame states remain.
 
-Scored runs also roll one weighted pantry drop (see [Pantry drops](#pantry-drops)); the game-over card appends it to the reward line via `MiniGameResultData.foodSuffix`.
+Naturally ended runs also roll one weighted pantry drop (see [Pantry drops](#pantry-drops)), including losses and runs during XP cooldown or after the XP daily cap. Game-over cards show food on its own line, separately from XP, with Mochi and Play again / Done actions. Replay waits until the result is saved. Quitting early does not submit a run.
+
+### Mochi-led game interfaces
+
+- Snack Catch: picnic sky and grass, a horizontally draggable Mochi with artwork-sized catches, happy/scared reactions, and floating catch/hit feedback.
+- Tickle Pop: freely draggable Mochi in a bubble field; bubbles pop on collision rather than direct taps. Combo meter and short pop bursts use active game time, so pausing preserves bubble lifetimes and combo windows.
+- Mood Match: stage-aware expressive sprites plus written mood labels, animated reveals, and checkmarks on matched cards. A paused mismatch stays revealed until play resumes.
+- Home Play panel: small illustrated previews, game-specific controls, run lengths, best scores, and separate XP / food availability.
+- Compact layouts: stats wrap, cards fit the board, and instructions/results scroll when vertical space is tight. Reduced-motion settings suppress sprite squash and card flips.
 
 ### Pantry drops
 
@@ -27,11 +38,11 @@ Feeding runs on earned stock (`food_inventory`), not a cooldown — snacks come 
 
 | Source | Rule | Daily cap |
 | --- | --- | --- |
-| Chat | 1 item per `chatFoodEveryN = 4` rewarded messages since the last chat drop | `chatFoodDailyCap = 3` |
-| Mini-game | 1 weighted drop per scored run | `gameFoodDailyCap = 5` |
-| Check-in | 1 weighted drop on the first check-in of the day | `checkInFoodDailyCap = 1` |
+| Chat | 1 item per `chatFoodEveryN = 2` rewarded messages since the last chat drop | `chatFoodDailyCap = 6` |
+| Mini-game | 1 weighted drop per naturally ended run, independent of XP eligibility | `gameFoodDailyCap = 10` |
+| Check-in | 1 Mochi bite + 1 onigiri on the first check-in of the day | `checkInFoodDailyCap = 2` items |
 
-Per-type stock caps at `foodInventoryCap = 9`; capped and stage-locked foods are skipped in the weighted roll (`Food.dropWeight`), so `ramen` only drops from Pup. A one-time starter pack (`starterMochiBites = 5` mochi bites + `starterOnigiri = 2` onigiri) seeds new saves.
+Per-type stock caps at `foodInventoryCap = 20`; capped and stage-locked foods are skipped in the weighted roll (`Food.dropWeight`), so `ramen` only drops from Pup. A capped check-in staple is replaced with an unlocked food with space; a full pantry grants nothing and consumes no food allowance. Duplicate check-ins never retry rewards. A one-time starter pack (`starterMochiBites = 8` mochi bites + `starterOnigiri = 4` onigiri) seeds saves that have never received a starter pack.
 
 ### XP curve (pure function, mood modifier still applies via `awardXp`)
 
@@ -45,8 +56,8 @@ Per-type stock caps at `foodInventoryCap = 9`; capped and stage-locked foods are
 
 - **Daily cap:** 5 scored plays/day total across all games.
 - **Cooldown:** 90s between scored plays.
-- **Pantry:** one weighted drop per scored play, capped at 5/day (`gameFoodDailyCap`); drops stop when the pantry is full.
-- Over-cap / cooldown runs are still playable but award **0 XP**, no pantry drop, and only a tiny mood effect.
+- **Pantry:** one weighted drop per naturally ended play, capped independently at 10/day (`gameFoodDailyCap`); drops stop when the pantry is full.
+- XP over-cap / cooldown runs award **0 XP** and a tiny mood effect, but can still earn pantry food. The Play panel displays separate XP and food allowances.
 - All awards route through `MochiRepository.awardXp` (`lib/db/mochi_repository.dart:262`), so `pet.mood.xpModifier` (`lib/models/mood.dart:86`), affection gain, `last_interaction_at`, and `checkStagePromotion()` stay single-sourced.
 
 ---
@@ -74,9 +85,9 @@ Per-type stock caps at `foodInventoryCap = 9`; capped and stage-locked foods are
   - cooldown check against last scored `mini_game_plays.created_at`
   - compute XP via `miniGameXpForScore`, then `awardXp`
   - apply per-game side-effects (satiety clamp, mood_score bump), then `checkStagePromotion()`
-  - roll one weighted pantry drop (`rollFoodDrop(source: FoodSource.game)`), included in the result
+  - roll one weighted pantry drop (`rollFoodDrop(source: FoodSource.game)`), included in every XP outcome's result
   - returns `MiniGameResult {outcome, xpAwarded, satietyAfter, playsRemaining, foodAwarded}`
-- [x] **Queries** — `dailyMiniGamePlays()`, `miniGameCooldownRemainingSeconds()`, `miniGameBestScores()`
+- [x] **Queries** — `dailyMiniGamePlays()`, `miniGameCooldownRemainingSeconds()`, `miniGameBestScores()`, `gameFoodRemaining()`
 - [x] **Feed** `lib/models/pet.dart` — `mini_game` case in `ActivityEntry.fromJson` (title/detail/accent/icon) and emitted from `feed()`
 - [x] **Tests** `test/mini_game_test.dart` (new) — `MochiDb.openInMemory()`: XP recorded, daily cap blocks 6th play, cooldown blocks early re-play, best score updates, side-effects, feed entry
 
@@ -101,10 +112,10 @@ Per-type stock caps at `foodInventoryCap = 9`; capped and stage-locked foods are
 
 *Goal: all three games playable end-to-end with rewards.*
 
-- [x] **Shell** `lib/games/game_shell.dart` (new) — `GameScaffold`, `GameHudPill`, `GameResultCard`, `MochiGameBlob`, `GameLifecycle` mixin + `GamePausedOverlay`; no LLM/TTS
+- [x] **Shell** `lib/games/game_shell.dart` — `GameScaffold`, `GameHudPill`, `GameResultCard`, `MochiGameSprite`, `GameScene`, `GameLifecycle` mixin + `GamePausedOverlay`; no LLM/TTS
 - [x] **Snack Catch** `lib/games/snack_catch_game.dart` (new) — drag/tap control, falling foods from `Food.emoji`, trash items, 3 lives, speed ramp, 60s
-- [x] **Tickle Pop** `lib/games/tickle_pop_game.dart` (new) — mood bubbles around Mochi, combo window, tap squash, 30s
-- [x] **Mood Match** `lib/games/mood_match_game.dart` (new) — 3/4-column grid of `MochiMood` icon cards, flip/reveal, move counter, par logic, 90s ceiling
+- [x] **Tickle Pop** `lib/games/tickle_pop_game.dart` — drag Mochi into bubbles, combo window/meter, pop bursts, 30s
+- [x] **Mood Match** `lib/games/mood_match_game.dart` — 3/4-column grid of labeled Mochi sprite cards, flip/reveal, matched checkmarks, move counter, par logic, 90s ceiling
 - [x] **Navigation** — Play buttons push each screen; finish calls `petProvider.playMiniGame(...)`
 - [x] **Tests** — reward/cap/cooldown/feed path covered by `test/mini_game_test.dart`; `test/mini_game_widget_test.dart` guards falling items, bubble spawning, and full-board card sizing (game-over animation still covered indirectly)
 

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../models/mood.dart';
+import '../models/pet.dart';
+import '../widgets/pet_sprite.dart';
 
 String formatGameClock(int seconds) {
   final int safe = seconds < 0 ? 0 : seconds;
@@ -21,6 +23,11 @@ class GameScaffold extends StatelessWidget {
     required this.hud,
     required this.child,
     required this.onQuit,
+    required this.instructions,
+    required this.started,
+    required this.onStart,
+    required this.onPause,
+    required this.pet,
   });
 
   final String title;
@@ -29,6 +36,11 @@ class GameScaffold extends StatelessWidget {
   final Widget hud;
   final Widget child;
   final VoidCallback onQuit;
+  final String instructions;
+  final bool started;
+  final VoidCallback onStart;
+  final VoidCallback? onPause;
+  final Pet pet;
 
   @override
   Widget build(BuildContext context) {
@@ -53,10 +65,7 @@ class GameScaffold extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
-                          Text(
-                            emoji,
-                            style: const TextStyle(fontSize: 22),
-                          ),
+                          Text(emoji, style: const TextStyle(fontSize: 22)),
                           const SizedBox(width: 8),
                           Text(
                             title,
@@ -66,9 +75,17 @@ class GameScaffold extends StatelessWidget {
                       ),
                     ),
                   ),
-                  hud,
+                  IconButton(
+                    onPressed: started ? onPause : null,
+                    tooltip: 'Pause game',
+                    icon: const Icon(Icons.pause_rounded),
+                  ),
                 ],
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: hud,
             ),
             Expanded(
               child: Padding(
@@ -76,7 +93,50 @@ class GameScaffold extends StatelessWidget {
                 child: Container(
                   decoration: pixelCardDecoration(accent),
                   clipBehavior: Clip.antiAlias,
-                  child: child,
+                  child: Stack(
+                    children: <Widget>[
+                      Positioned.fill(child: child),
+                      if (!started)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: MochiPalette.background.withValues(
+                              alpha: 0.96,
+                            ),
+                            child: Center(
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.all(24),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
+                                    MochiGameSprite(size: 140, pet: pet),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      title,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.headlineMedium,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      instructions,
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodyLarge,
+                                    ),
+                                    const SizedBox(height: 24),
+                                    FilledButton(
+                                      onPressed: onStart,
+                                      child: const Text('Start'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -114,10 +174,7 @@ class GameHudPill extends StatelessWidget {
         children: <Widget>[
           Icon(icon, size: 15, color: MochiPalette.ink),
           const SizedBox(width: 5),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
+          Text(label, style: Theme.of(context).textTheme.labelLarge),
         ],
       ),
     );
@@ -136,6 +193,8 @@ class GameResultCard extends StatelessWidget {
     required this.onReplay,
     required this.onDone,
     this.replayLabel = 'Play again',
+    this.pet,
+    this.ready = true,
   });
 
   final String emoji;
@@ -145,56 +204,60 @@ class GameResultCard extends StatelessWidget {
   final VoidCallback onReplay;
   final VoidCallback onDone;
   final String replayLabel;
+  final Pet? pet;
+  final bool ready;
 
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
       color: MochiPalette.ink.withValues(alpha: 0.28),
       child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 340),
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: pixelCardDecoration(accent),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(emoji, style: const TextStyle(fontSize: 44)),
-                const SizedBox(height: 8),
-                Text(
-                  headline,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 10),
-                for (final String line in lines)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      line,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
+        child: SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: pixelCardDecoration(accent),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  MochiGameSprite(size: 100, pet: pet, mood: MochiMood.happy),
+                  const SizedBox(height: 8),
+                  Text(
+                    headline,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                const SizedBox(height: 16),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: onDone,
-                        child: const Text('Done'),
+                  const SizedBox(height: 10),
+                  for (final String line in lines)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        line,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: onReplay,
-                        child: Text(replayLabel),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: onDone,
+                          child: const Text('Done'),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: ready ? onReplay : null,
+                          child: Text(replayLabel),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -203,51 +266,167 @@ class GameResultCard extends StatelessWidget {
   }
 }
 
-/// A soft Mochi-ish paddle/creature used by the reflex games.
-class MochiGameBlob extends StatelessWidget {
-  const MochiGameBlob({
+/// Cropped to the creature so movement and collisions follow visible artwork.
+class MochiGameSprite extends StatelessWidget {
+  const MochiGameSprite({
     super.key,
     required this.size,
     this.mood = MochiMood.laughing,
     this.squash = false,
+    this.pet,
   });
 
   final double size;
   final MochiMood mood;
   final bool squash;
+  final Pet? pet;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedScale(
-      scale: squash ? 0.86 : 1,
-      duration: const Duration(milliseconds: 120),
-      child: Container(
+      scale: squash && !MediaQuery.disableAnimationsOf(context) ? 0.86 : 1,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 120),
+      child: SizedBox(
         width: size,
         height: size,
-        decoration: BoxDecoration(
-          color: mood.color,
-          shape: BoxShape.circle,
-          border: Border.all(color: MochiPalette.ink, width: 3),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: MochiPalette.ink.withValues(alpha: 0.2),
-              offset: const Offset(3, 4),
-              blurRadius: 0,
+        child: Semantics(
+          label: 'Mochi',
+          image: true,
+          child: ClipRect(
+            child: OverflowBox(
+              maxWidth: size * 1.8,
+              maxHeight: size * 1.8,
+              child: Image.asset(
+                mochiSpriteAsset(
+                  (pet ??
+                          const Pet(
+                            id: 0,
+                            name: 'Mochi',
+                            stageNumber: 3,
+                            xp: 0,
+                            mood: MochiMood.normal,
+                            moodScore: 60,
+                          ))
+                      .copyWith(mood: mood),
+                ),
+                width: size * 1.8,
+                height: size * 1.8,
+                filterQuality: FilterQuality.none,
+                gaplessPlayback: true,
+              ),
             ),
-          ],
-        ),
-        child: Center(
-          child: Icon(mood.icon, size: size * 0.44, color: MochiPalette.ink),
+          ),
         ),
       ),
     );
   }
 }
 
+class GameScene extends StatelessWidget {
+  const GameScene({super.key, this.picnic = false});
+  final bool picnic;
+
+  @override
+  Widget build(BuildContext context) =>
+      IgnorePointer(child: CustomPaint(painter: _GameScenePainter(picnic)));
+}
+
+class _GameScenePainter extends CustomPainter {
+  _GameScenePainter(this.picnic);
+  final bool picnic;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint();
+    canvas.drawRect(
+      Offset.zero & size,
+      paint..color = picnic ? MochiPalette.cloudBlue : MochiPalette.lavender,
+    );
+    if (picnic) {
+      for (final Offset cloud in <Offset>[
+        Offset(size.width * 0.15, 85),
+        Offset(size.width * 0.75, 145),
+      ]) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(center: cloud, width: 90, height: 22),
+            const Radius.circular(12),
+          ),
+          paint..color = Colors.white.withValues(alpha: 0.8),
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromCenter(
+              center: cloud - const Offset(0, 12),
+              width: 50,
+              height: 22,
+            ),
+            const Radius.circular(12),
+          ),
+          paint,
+        );
+      }
+      canvas.drawRect(
+        Rect.fromLTWH(0, size.height - 38, size.width, 38),
+        paint..color = MochiPalette.mint,
+      );
+      canvas.drawLine(
+        Offset(0, size.height - 38),
+        Offset(size.width, size.height - 38),
+        paint
+          ..color = MochiPalette.ink.withValues(alpha: 0.15)
+          ..strokeWidth = 2,
+      );
+    } else {
+      paint
+        ..color = Colors.white.withValues(alpha: 0.3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3;
+      for (int i = 0; i < 7; i++) {
+        canvas.drawCircle(
+          Offset(
+            size.width * ((i * 0.37) % 1),
+            size.height * ((i * 0.23 + 0.1) % 1),
+          ),
+          20 + i * 5,
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GameScenePainter oldDelegate) =>
+      picnic != oldDelegate.picnic;
+}
+
 /// Pauses a game's timers while the app is backgrounded. Games wire
 /// [onGamePause]/[onGameResume] to cancel and restart their own timers.
-mixin GameLifecycle<T extends StatefulWidget> on State<T>, WidgetsBindingObserver {
+mixin GameLifecycle<T extends StatefulWidget>
+    on State<T>, WidgetsBindingObserver {
   bool _gamePaused = false;
+  bool gameStarted = false;
+  bool get gameActive => gameStarted && !_gamePaused;
+
+  void startGame() {
+    setState(() {
+      gameStarted = true;
+      _gamePaused = false;
+    });
+    onGameResume();
+  }
+
+  void toggleGamePause() {
+    if (!gameStarted) return;
+    setState(() => _gamePaused = !_gamePaused);
+    if (_gamePaused) {
+      onGamePause();
+    } else {
+      onGameResume();
+    }
+  }
 
   bool get gamePaused => _gamePaused;
 
@@ -265,18 +444,14 @@ mixin GameLifecycle<T extends StatefulWidget> on State<T>, WidgetsBindingObserve
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      if (_gamePaused) {
+    if (state != AppLifecycleState.resumed) {
+      if (_gamePaused || !gameStarted) {
         return;
       }
       _gamePaused = true;
       onGamePause();
     } else if (state == AppLifecycleState.resumed) {
-      if (!_gamePaused) {
-        return;
-      }
-      _gamePaused = false;
-      onGameResume();
+      return;
     } else {
       return;
     }
@@ -292,7 +467,8 @@ mixin GameLifecycle<T extends StatefulWidget> on State<T>, WidgetsBindingObserve
 
 /// Dimmed overlay shown while a game is paused by the OS.
 class GamePausedOverlay extends StatelessWidget {
-  const GamePausedOverlay({super.key});
+  const GamePausedOverlay({super.key, required this.onResume});
+  final VoidCallback onResume;
 
   @override
   Widget build(BuildContext context) {
@@ -308,6 +484,8 @@ class GamePausedOverlay extends StatelessWidget {
               const Icon(Icons.pause_circle_rounded, size: 34),
               const SizedBox(height: 6),
               Text('Paused', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: onResume, child: const Text('Resume')),
             ],
           ),
         ),
@@ -315,4 +493,3 @@ class GamePausedOverlay extends StatelessWidget {
     );
   }
 }
-

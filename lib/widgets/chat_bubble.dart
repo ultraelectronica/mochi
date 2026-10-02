@@ -39,21 +39,28 @@ class ChatBubble extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: <Widget>[
         if (petSide) ...<Widget>[
-          MochiPetAvatar(pet: petProvider.pet, size: 32),
+          if (showAuthor)
+            MochiPetAvatar(pet: petProvider.pet, size: 32)
+          else
+            const SizedBox(width: 32),
           const SizedBox(width: 8),
         ],
         Flexible(
           child: Container(
-            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+            constraints: const BoxConstraints(maxWidth: 560),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
             decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.22),
+              color: petSide ? Colors.white : accent.withValues(alpha: 0.3),
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(18),
                 topRight: const Radius.circular(18),
                 bottomLeft: Radius.circular(petSide ? 6 : 18),
                 bottomRight: Radius.circular(petSide ? 18 : 6),
               ),
-              border: Border.all(color: MochiPalette.ink, width: 2),
+              border: Border.all(
+                color: MochiPalette.ink.withValues(alpha: 0.3),
+                width: 1,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -73,12 +80,11 @@ class ChatBubble extends StatelessWidget {
                       ),
                     ),
                   ),
-                Text(
+                SelectableText(
                   entry.text,
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontSize: 15,
-                    height: 1.35,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge?.copyWith(fontSize: 17, height: 1.5),
                 ),
               ],
             ),
@@ -86,7 +92,10 @@ class ChatBubble extends StatelessWidget {
         ),
         if (!petSide) ...<Widget>[
           const SizedBox(width: 8),
-          MemberAvatar(member: currentMember, size: 32),
+          if (showAuthor)
+            MemberAvatar(member: currentMember, size: 32)
+          else
+            const SizedBox(width: 32),
         ],
       ],
     );
@@ -114,9 +123,7 @@ class MochiPetAvatar extends StatelessWidget {
       decoration: BoxDecoration(
         color: pet.mood.color,
         shape: BoxShape.circle,
-        border: bordered
-            ? Border.all(color: MochiPalette.ink, width: 2)
-            : null,
+        border: bordered ? Border.all(color: MochiPalette.ink, width: 2) : null,
       ),
       clipBehavior: Clip.antiAlias,
       child: Image.asset(

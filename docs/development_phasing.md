@@ -8,6 +8,9 @@
 
 This document ties together:
 
+Current local reward rollout: [Generous pantry — development phasing](food-rewards.md)
+documents the food balance, implementation phases, and verification criteria.
+
 1. **Development life-cycle (SDLC) stages** — where the project sits in a classic software lifecycle.
 2. **Product roadmap phases (1–3)** — MVP themes from the root [README.md](../README.md), with **checkbox checkpoints** grounded in the real Flutter + `server/` tree.
 
@@ -109,7 +112,7 @@ Where **Mochi** is today: past early **requirements** and **architecture**, deep
   - [x] Mood-based bob, tilt, asset selection.
   - [ ] Richer motion (transitions, optional frame sequences, effects).
 - [ ] **Daily engagement**
-  - [x] Mood decay job + check-in flow (first check-in of the day drops a pantry treat).
+  - [x] Mood decay job + check-in flow (first check-in of the day grants a Mochi bite + onigiri bundle, with available-food fallback).
   - [x] Mini-games (Snack Catch / Tickle Pop / Mood Match) feeding XP, mood, satiety, and pantry treats — see [mini-games.md](mini-games.md).
   - [ ] Push or local notifications; scheduled nudges; “milestone notifications” backed by real notifications *(toggle is in-memory today).*
 
