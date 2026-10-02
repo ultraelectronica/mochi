@@ -20,7 +20,8 @@ import '../services/local_llm/scope_guard.dart';
 import '../services/tts_service.dart';
 
 class PetProvider extends ChangeNotifier {
-  PetProvider({TtsService? ttsService}) : _ttsService = ttsService ?? TtsService();
+  PetProvider({TtsService? ttsService})
+    : _ttsService = ttsService ?? TtsService();
 
   final TtsService _ttsService;
 
@@ -34,7 +35,7 @@ class PetProvider extends ChangeNotifier {
   List<ActivityEntry> _feedEntries = <ActivityEntry>[];
   List<MemorySnippet> _memories = <MemorySnippet>[];
   Map<int, MochiMood> _memberCheckIns = <int, MochiMood>{};
-  Food? _pendingFoodDrop;
+  final List<Food> _pendingFoodDrops = <Food>[];
 
   bool _llamaOnline = false;
   bool _ttsEnabled = true;
@@ -119,8 +120,7 @@ class PetProvider extends ChangeNotifier {
 
   Future<void> _warmModel() async {
     try {
-      final bool installed =
-          await ModelManager.instance.selectedInstalled();
+      final bool installed = await ModelManager.instance.selectedInstalled();
       if (!installed) {
         return;
       }
@@ -144,7 +144,10 @@ class PetProvider extends ChangeNotifier {
     await Future<void>.delayed(Duration.zero);
   }
 
-  Future<void> _reloadLocal({bool includeChat = true}) async {
+  Future<void> _reloadLocal({
+    bool includeChat = true,
+    bool replacePendingChat = false,
+  }) async {
     _pet = _repo.getPet();
     _profile = _repo.getProfile();
     _memories = _repo.listMemories();
@@ -152,7 +155,7 @@ class PetProvider extends ChangeNotifier {
     _memberCheckIns = _repo.todayMoodMap();
 
     if (includeChat) {
-      if (_activeSessionId != null) {
+      if (_activeSessionId != null && (!_replyPending || replacePendingChat)) {
         _chatEntries = _repo.chatHistory(sessionId: _activeSessionId!);
       }
       _sessions = _repo.listSessions();
@@ -184,6 +187,8 @@ class PetProvider extends ChangeNotifier {
     required String text,
     String inputType = 'text',
   }) async {
+    if (_replyPending) return;
+    final List<ChatEntry> previousEntries = _chatEntries;
     final ChatEntry optimistic = ChatEntry.local(
       author: member.name,
       text: text,
@@ -292,16 +297,11 @@ class PetProvider extends ChangeNotifier {
         inputType: inputType,
       );
     } on _LocalModelMissingException {
-      if (_chatEntries.isNotEmpty) {
-        _chatEntries = _chatEntries.sublist(0, _chatEntries.length - 1);
-      }
+      _chatEntries = previousEntries;
       _errorMessage =
           "Mochi's brain is not downloaded. Open Settings to add it.";
     } catch (error) {
-      _chatEntries = <ChatEntry>[
-        for (final ChatEntry entry in _chatEntries)
-          if (entry != optimistic && !identical(entry, streamEntry)) entry,
-      ];
+      _chatEntries = previousEntries;
       _applyError(error);
       rethrow;
     } finally {
@@ -320,8 +320,10 @@ class PetProvider extends ChangeNotifier {
     required String inputType,
     bool reward = true,
   }) async {
-    final int sessionId =
-        _repo.resolveSession(memberId: member.id, requestedSessionId: _activeSessionId);
+    final int sessionId = _repo.resolveSession(
+      memberId: member.id,
+      requestedSessionId: _activeSessionId,
+    );
     final int xpAwarded = reward
         ? _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerChat)
         : 0;
@@ -341,7 +343,10 @@ class PetProvider extends ChangeNotifier {
     }
     _repo.checkStagePromotion();
     if (reward) {
-      _pendingFoodDrop = _repo.claimChatFoodDrop(memberId: member.id);
+      final Food? food = _repo.claimChatFoodDrop(memberId: member.id);
+      if (food != null) {
+        _pendingFoodDrops.add(food);
+      }
     }
     _repo.recalculateMood();
 
@@ -354,13 +359,14 @@ class PetProvider extends ChangeNotifier {
       ChatEntry.local(author: 'Mochi', text: reply, isPet: true),
     ];
     _errorMessage = null;
-    await _reloadLocal();
+    await _reloadLocal(replacePendingChat: true);
     if (_ttsEnabled && reply.isNotEmpty) {
       unawaited(_ttsService.speak(reply));
     }
   }
 
   void startNewSession() {
+    if (_replyPending) return;
     _activeSessionId = null;
     _chatEntries = <ChatEntry>[];
     _errorMessage = null;
@@ -368,6 +374,7 @@ class PetProvider extends ChangeNotifier {
   }
 
   Future<void> selectSession(int sessionId) async {
+    if (_replyPending) return;
     if (_activeSessionId == sessionId) {
       return;
     }
@@ -380,6 +387,7 @@ class PetProvider extends ChangeNotifier {
   }
 
   Future<void> deleteSession(int sessionId) async {
+    if (_replyPending) return;
     _repo.deleteSession(sessionId);
     _sessions = _repo.listSessions();
     if (_activeSessionId == sessionId) {
@@ -401,9 +409,8 @@ class PetProvider extends ChangeNotifier {
     if (_repo.memberCheckedInToday(member.id)) {
       return false;
     }
-    _pendingFoodDrop = _repo.recordMoodCheckIn(
-      memberId: member.id,
-      mood: mood.name,
+    _pendingFoodDrops.addAll(
+      _repo.recordMoodCheckIn(memberId: member.id, mood: mood.name),
     );
     _repo.awardXp(memberId: member.id, amount: GameConfig.xpPerCheckin);
     _repo.checkStagePromotion();
@@ -426,12 +433,11 @@ class PetProvider extends ChangeNotifier {
     return _repo.foodInventory(memberId: _profile!.id);
   }
 
-  /// Treat earned by the last rewarded chat or check-in; the UI consumes it
-  /// once for a reward toast.
-  Food? consumePendingFoodDrop() {
-    final Food? food = _pendingFoodDrop;
-    _pendingFoodDrop = null;
-    return food;
+  /// The UI consumes earned chat/check-in treats once for a reward toast.
+  List<Food> consumePendingFoodDrops() {
+    final List<Food> foods = List<Food>.unmodifiable(_pendingFoodDrops);
+    _pendingFoodDrops.clear();
+    return foods;
   }
 
   Future<FeedResult> feed(Food food) async {
@@ -446,6 +452,10 @@ class PetProvider extends ChangeNotifier {
 
   int dailyMiniGamePlays() {
     return _repo.dailyMiniGamePlays(memberId: _profile!.id);
+  }
+
+  int gameFoodRemaining() {
+    return _repo.gameFoodRemaining(memberId: _profile!.id);
   }
 
   Map<MiniGame, int> miniGameBestScores() {
@@ -489,7 +499,9 @@ class PetProvider extends ChangeNotifier {
     final Map<Food, int> counts = _repo.foodInventory(memberId: _profile!.id);
     final String items = counts.entries
         .where((MapEntry<Food, int> entry) => entry.value > 0)
-        .map((MapEntry<Food, int> entry) => '${entry.value}x ${entry.key.label}')
+        .map(
+          (MapEntry<Food, int> entry) => '${entry.value}x ${entry.key.label}',
+        )
         .join(', ');
     return items.isEmpty ? 'empty' : items;
   }
@@ -537,7 +549,7 @@ class PetProvider extends ChangeNotifier {
     _feedEntries = <ActivityEntry>[];
     _memories = <MemorySnippet>[];
     _memberCheckIns = <int, MochiMood>{};
-    _pendingFoodDrop = null;
+    _pendingFoodDrops.clear();
     _replyPending = false;
     _errorMessage = null;
     _isLoading = false;
