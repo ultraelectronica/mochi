@@ -26,13 +26,13 @@ class GameConfig {
 
   // Feeding is stock-limited, not time-limited: items are earned from chats,
   // mini-games, and the daily check-in.
-  static const int foodInventoryCap = 9;
-  static const int chatFoodEveryN = 4;
-  static const int chatFoodDailyCap = 3;
-  static const int gameFoodDailyCap = 5;
-  static const int checkInFoodDailyCap = 1;
-  static const int starterMochiBites = 5;
-  static const int starterOnigiri = 2;
+  static const int foodInventoryCap = 20;
+  static const int chatFoodEveryN = 2;
+  static const int chatFoodDailyCap = 6;
+  static const int gameFoodDailyCap = 10;
+  static const int checkInFoodDailyCap = 2;
+  static const int starterMochiBites = 8;
+  static const int starterOnigiri = 4;
 
   static const int maxMemoriesPerMember = 12;
   static const int memoryPruneDays = 30;

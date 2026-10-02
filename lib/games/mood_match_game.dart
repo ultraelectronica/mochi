@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import '../config/app_config.dart';
 import '../config/game_config.dart';
 import '../models/mood.dart';
+import '../models/food.dart';
+import '../models/pet.dart';
 import '../providers/pet_provider.dart';
 import 'game_shell.dart';
 import 'mini_game.dart';
@@ -34,14 +36,14 @@ class _MoodMatchGameState extends State<MoodMatchGame>
   final Set<int> _revealed = <int>{};
 
   Timer? _countdown;
+  Timer? _revealTimer;
   int _remaining = GameConfig.moodMatchSeconds;
   int _moves = 0;
   bool _busy = false;
   bool _over = false;
   MiniGameResult? _result;
 
-  int get _matchedCount =>
-      _cards.where((_Card card) => card.matched).length;
+  int get _matchedCount => _cards.where((_Card card) => card.matched).length;
 
   bool get _allMatched => _cards.isNotEmpty && _matchedCount == _cards.length;
 
@@ -49,17 +51,18 @@ class _MoodMatchGameState extends State<MoodMatchGame>
   void initState() {
     super.initState();
     _deal();
-    _countdown = Timer.periodic(const Duration(seconds: 1), _tick);
   }
 
   @override
   void dispose() {
+    _revealTimer?.cancel();
     _countdown?.cancel();
     super.dispose();
   }
 
   @override
   void onGamePause() {
+    _revealTimer?.cancel();
     _countdown?.cancel();
   }
 
@@ -69,6 +72,7 @@ class _MoodMatchGameState extends State<MoodMatchGame>
       return;
     }
     _countdown = Timer.periodic(const Duration(seconds: 1), _tick);
+    if (_busy) _hideMismatch();
   }
 
   void _deal() {
@@ -96,8 +100,8 @@ class _MoodMatchGameState extends State<MoodMatchGame>
     }
   }
 
-  Future<void> _tap(int index) async {
-    if (_over || _busy) {
+  void _tap(int index) {
+    if (_over || _busy || !gameActive) {
       return;
     }
     final _Card card = _cards[index];
@@ -127,17 +131,22 @@ class _MoodMatchGameState extends State<MoodMatchGame>
     }
 
     _busy = true;
-    await Future<void>.delayed(const Duration(milliseconds: 720));
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _revealed.clear();
-      _busy = false;
+    _hideMismatch();
+  }
+
+  void _hideMismatch() {
+    _revealTimer?.cancel();
+    _revealTimer = Timer(const Duration(milliseconds: 720), () {
+      if (!mounted || _over || !gameActive) return;
+      setState(() {
+        _revealed.clear();
+        _busy = false;
+      });
     });
   }
 
   Future<void> _finish() async {
+    _revealTimer?.cancel();
     if (_over) {
       return;
     }
@@ -159,6 +168,7 @@ class _MoodMatchGameState extends State<MoodMatchGame>
   }
 
   void _reset() {
+    _revealTimer?.cancel();
     setState(() {
       _cards.clear();
       _revealed.clear();
@@ -179,8 +189,14 @@ class _MoodMatchGameState extends State<MoodMatchGame>
       emoji: '🃏',
       accent: MochiPalette.mint,
       onQuit: () => Navigator.of(context).pop(),
-      hud: Row(
-        mainAxisSize: MainAxisSize.min,
+      pet: widget.petProvider.pet,
+      instructions:
+          'Turn over two cards and find matching Mochi moods. Six pairs, one cozy puzzle. Take your time!',
+      started: gameStarted,
+      onStart: startGame,
+      onPause: _over ? null : toggleGamePause,
+      hud: Wrap(
+        runSpacing: 6,
         children: <Widget>[
           GameHudPill(
             icon: Icons.timer_outlined,
@@ -227,21 +243,28 @@ class _MoodMatchGameState extends State<MoodMatchGame>
                         card: _cards[i],
                         faceUp: _revealed.contains(i) || _cards[i].matched,
                         onTap: () => _tap(i),
+                        pet: widget.petProvider.pet,
                       ),
                   ],
                 ),
               ),
               if (gamePaused && !_over)
-                const Positioned.fill(child: GamePausedOverlay()),
+                Positioned.fill(
+                  child: GamePausedOverlay(onResume: toggleGamePause),
+                ),
               if (_over)
                 Positioned.fill(
                   child: GameResultCard(
+                    pet: widget.petProvider.pet,
+                    ready: _result != null,
                     emoji: '🃏',
                     headline: _allMatched ? 'All matched!' : 'Time is up',
                     accent: MochiPalette.mint,
                     lines: <String>[
                       'Pairs ${_matchedCount ~/ 2}/6 · $_moves moves',
                       _rewardLine(_result),
+                      if (_result?.foodAwarded != null)
+                        '+1 ${_result!.foodAwarded!.emoji} ${_result!.foodAwarded!.label}',
                     ],
                     onReplay: _reset,
                     onDone: () => Navigator.of(context).pop(),
@@ -259,11 +282,9 @@ class _MoodMatchGameState extends State<MoodMatchGame>
       return 'Saving the run...';
     }
     return switch (result.outcome) {
-      MiniGameOutcome.rewarded =>
-        '+${result.xpAwarded} XP · calm and cozy${result.foodSuffix}',
-      MiniGameOutcome.dailyCapReached =>
-        'Daily play bonus used up. Still fun though!',
-      MiniGameOutcome.cooldown => 'On cooldown. No XP this time.',
+      MiniGameOutcome.rewarded => '+${result.xpAwarded} XP · calm and cozy',
+      MiniGameOutcome.dailyCapReached ||
+      MiniGameOutcome.cooldown => result.xpRestLine,
     };
   }
 }
@@ -273,42 +294,92 @@ class _MoodCard extends StatelessWidget {
     required this.card,
     required this.faceUp,
     required this.onTap,
+    required this.pet,
   });
 
   final _Card card;
   final bool faceUp;
   final VoidCallback onTap;
+  final Pet? pet;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        decoration: BoxDecoration(
-          color: faceUp
-              ? card.mood.color.withValues(alpha: 0.8)
-              : MochiPalette.cloudBlue.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: card.matched ? MochiPalette.mint : MochiPalette.ink,
-            width: card.matched ? 3.5 : 2.5,
+    return Semantics(
+      button: true,
+      label: card.matched
+          ? '${card.mood.label} matched'
+          : faceUp
+          ? card.mood.label
+          : 'Hidden mood card',
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          decoration: BoxDecoration(
+            color: faceUp
+                ? card.mood.color.withValues(alpha: 0.8)
+                : MochiPalette.cloudBlue.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: card.matched ? MochiPalette.mint : MochiPalette.ink,
+              width: card.matched ? 3.5 : 2.5,
+            ),
           ),
-        ),
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final double iconSize =
-                constraints.biggest.shortestSide * 0.42;
-            return Center(
-              child: faceUp
-                  ? Icon(card.mood.icon, size: iconSize, color: MochiPalette.ink)
-                  : Icon(
-                      Icons.question_mark_rounded,
-                      size: iconSize * 0.8,
-                      color: MochiPalette.ink,
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final double iconSize = max(
+                0.0,
+                min(
+                  constraints.maxWidth * 0.42,
+                  (constraints.maxHeight - (card.matched ? 42 : 24)) / 1.6,
+                ),
+              );
+              return Center(
+                child: AnimatedSwitcher(
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 220),
+                  transitionBuilder: (child, animation) => AnimatedBuilder(
+                    animation: animation,
+                    child: child,
+                    builder: (context, child) => Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.identity()
+                        ..setEntry(3, 2, 0.001)
+                        ..rotateY((1 - animation.value) * pi / 2),
+                      child: child,
                     ),
-            );
-          },
+                  ),
+                  child: faceUp
+                      ? Column(
+                          key: ValueKey(card.mood),
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            MochiGameSprite(
+                              size: iconSize * 1.6,
+                              pet: pet,
+                              mood: card.mood,
+                            ),
+                            FittedBox(
+                              child: Text(
+                                card.mood.label,
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ),
+                            if (card.matched)
+                              const Icon(Icons.check_rounded, size: 18),
+                          ],
+                        )
+                      : Icon(
+                          Icons.favorite_rounded,
+                          key: const ValueKey('back'),
+                          size: iconSize * 0.8,
+                          color: MochiPalette.ink,
+                        ),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );

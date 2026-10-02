@@ -7,14 +7,16 @@ import 'package:flutter/services.dart';
 import '../config/app_config.dart';
 import '../config/game_config.dart';
 import '../models/mood.dart';
+import '../models/food.dart';
 import '../providers/pet_provider.dart';
 import 'game_shell.dart';
 import 'mini_game.dart';
 
 class TicklePopGame extends StatefulWidget {
-  const TicklePopGame({super.key, required this.petProvider});
+  const TicklePopGame({super.key, required this.petProvider, this.random});
 
   final PetProvider petProvider;
+  final Random? random;
 
   @override
   State<TicklePopGame> createState() => _TicklePopGameState();
@@ -33,39 +35,38 @@ class _Bubble {
   double y;
   final double size;
   final MochiMood mood;
-  final DateTime bornAt;
+  final double bornAt;
 }
 
 class _TicklePopGameState extends State<TicklePopGame>
     with WidgetsBindingObserver, GameLifecycle<TicklePopGame> {
-  static const Duration _lifetime = Duration(milliseconds: 1400);
-  static const int _comboWindowMs = 1100;
+  static const double _lifetime = 1.4;
+  static const double _comboWindow = 1.1;
 
-  final Random _random = Random();
+  late final Random _random = widget.random ?? Random();
   final List<_Bubble> _bubbles = <_Bubble>[];
 
   Size _area = Size.zero;
   Timer? _ticker;
   Timer? _countdown;
+  Timer? _squashTimer;
   double _spawnCooldown = 0.3;
   int _remaining = GameConfig.ticklePopDurationSeconds;
   int _popped = 0;
   int _combo = 0;
   int _bestCombo = 0;
-  DateTime? _lastPop;
+  double? _lastPop;
+  double _elapsed = 0;
   bool _over = false;
   bool _squash = false;
   MiniGameResult? _result;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(const Duration(milliseconds: 16), _tick);
-    _countdown = Timer.periodic(const Duration(seconds: 1), _countDown);
-  }
+  Offset? _mochi;
+  static const double _mochiSize = 88;
+  final List<({Offset position, double bornAt, int combo})> _bursts = [];
 
   @override
   void dispose() {
+    _squashTimer?.cancel();
     _ticker?.cancel();
     _countdown?.cancel();
     super.dispose();
@@ -97,17 +98,19 @@ class _TicklePopGameState extends State<TicklePopGame>
   }
 
   void _tick(Timer timer) {
-    if (_over || _area == Size.zero) {
+    if (_over || !gameActive || _area == Size.zero) {
       return;
     }
     const double dt = 0.016;
-    final DateTime now = DateTime.now();
-    _bubbles.removeWhere(
-      (_Bubble bubble) {
-        bubble.y -= 26 * dt;
-        return now.difference(bubble.bornAt) >= _lifetime;
-      },
-    );
+    final double now = _elapsed += dt;
+    _bursts.removeWhere((burst) => now - burst.bornAt > 0.5);
+    if (_lastPop != null && now - _lastPop! >= _comboWindow) {
+      _combo = 0;
+    }
+    _bubbles.removeWhere((_Bubble bubble) {
+      bubble.y -= 26 * dt;
+      return now - bubble.bornAt >= _lifetime;
+    });
 
     _spawnCooldown -= dt;
     if (_spawnCooldown <= 0) {
@@ -115,6 +118,7 @@ class _TicklePopGameState extends State<TicklePopGame>
       _spawnCooldown =
           0.5 - (1 - _remaining / GameConfig.ticklePopDurationSeconds) * 0.2;
     }
+    _checkCollisions();
 
     setState(() {});
   }
@@ -129,28 +133,63 @@ class _TicklePopGameState extends State<TicklePopGame>
         y: y,
         size: size,
         mood: MochiMood.values[_random.nextInt(MochiMood.values.length)],
-        bornAt: DateTime.now(),
+        bornAt: _elapsed,
       ),
     );
   }
 
   void _pop(_Bubble bubble) {
-    final DateTime now = DateTime.now();
-    final bool chained =
-        _lastPop != null &&
-        now.difference(_lastPop!).inMilliseconds < _comboWindowMs;
+    if (!gameActive || _over) return;
+    final double now = _elapsed;
+    final bool chained = _lastPop != null && now - _lastPop! < _comboWindow;
     _combo = chained ? _combo + 1 : 1;
     _bestCombo = max(_bestCombo, _combo);
     _lastPop = now;
     _popped++;
+    _bursts.add((
+      position: Offset(bubble.x, bubble.y),
+      bornAt: now,
+      combo: _combo,
+    ));
     _squash = true;
     HapticFeedback.lightImpact();
-    Future<void>.delayed(const Duration(milliseconds: 120), () {
+    _squashTimer?.cancel();
+    _squashTimer = Timer(const Duration(milliseconds: 120), () {
       if (mounted) {
         setState(() => _squash = false);
       }
     });
     setState(() => _bubbles.remove(bubble));
+  }
+
+  void _checkCollisions() {
+    if (_mochi == null) return;
+    for (final _Bubble bubble in List<_Bubble>.of(_bubbles)) {
+      final Offset center = Offset(
+        bubble.x + bubble.size / 2,
+        bubble.y + bubble.size / 2,
+      );
+      if ((center - _mochi!).distance <= bubble.size / 2 + _mochiSize * 0.35) {
+        _pop(bubble);
+      }
+    }
+  }
+
+  void _move(Offset position) {
+    if (_over || !gameActive) return;
+    setState(
+      () => _mochi = Offset(
+        position.dx.clamp(
+          _mochiSize / 2,
+          max(_mochiSize / 2, _area.width - _mochiSize / 2),
+        ),
+        position.dy.clamp(
+          _mochiSize / 2,
+          max(_mochiSize / 2, _area.height - _mochiSize / 2),
+        ),
+      ),
+    );
+    _checkCollisions();
   }
 
   Future<void> _finish() async {
@@ -176,6 +215,7 @@ class _TicklePopGameState extends State<TicklePopGame>
   }
 
   void _reset() {
+    _squashTimer?.cancel();
     setState(() {
       _bubbles.clear();
       _remaining = GameConfig.ticklePopDurationSeconds;
@@ -183,9 +223,13 @@ class _TicklePopGameState extends State<TicklePopGame>
       _combo = 0;
       _bestCombo = 0;
       _lastPop = null;
+      _elapsed = 0;
       _over = false;
       _result = null;
       _spawnCooldown = 0.3;
+      _mochi = null;
+      _bursts.clear();
+      _squash = false;
     });
     _ticker = Timer.periodic(const Duration(milliseconds: 16), _tick);
     _countdown = Timer.periodic(const Duration(seconds: 1), _countDown);
@@ -198,8 +242,14 @@ class _TicklePopGameState extends State<TicklePopGame>
       emoji: '🫧',
       accent: MochiPalette.lavender,
       onQuit: () => Navigator.of(context).pop(),
-      hud: Row(
-        mainAxisSize: MainAxisSize.min,
+      pet: widget.petProvider.pet,
+      instructions:
+          'Drag Mochi through the bubbles to pop them. Keep moving to chain combos! Thirty seconds, no lost hearts.',
+      started: gameStarted,
+      onStart: startGame,
+      onPause: _over ? null : toggleGamePause,
+      hud: Wrap(
+        runSpacing: 6,
         children: <Widget>[
           GameHudPill(
             icon: Icons.timer_outlined,
@@ -217,51 +267,115 @@ class _TicklePopGameState extends State<TicklePopGame>
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           _area = Size(constraints.maxWidth, constraints.maxHeight);
-          return Stack(
-            children: <Widget>[
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        MochiPalette.lavender.withValues(alpha: 0.5),
-                        Colors.white,
+          _mochi ??= Offset(_area.width / 2, _area.height / 2);
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (details) => _move(details.localPosition),
+            onPanUpdate: (details) => _move(details.localPosition),
+            child: Stack(
+              children: <Widget>[
+                const Positioned.fill(child: GameScene()),
+                Positioned(
+                  bottom: 16,
+                  left: 20,
+                  right: 20,
+                  child: IgnorePointer(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text(
+                          _combo > 1
+                              ? 'Keep it going! x$_combo'
+                              : 'Chase a little joy',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            minHeight: 6,
+                            value: _lastPop == null
+                                ? 0
+                                : (1 - (_elapsed - _lastPop!) / _comboWindow)
+                                      .clamp(0.0, 1.0),
+                            color: MochiPalette.ink,
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.5,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
-              ),
-              Center(child: MochiGameBlob(size: 120, squash: _squash)),
-              for (final _Bubble bubble in _bubbles)
                 Positioned(
-                  left: bubble.x,
-                  top: bubble.y,
-                  child: GestureDetector(
-                    onTap: () => _pop(bubble),
-                    child: _BubbleView(bubble: bubble),
+                  top: 18,
+                  left: 16,
+                  right: 16,
+                  child: IgnorePointer(
+                    child: Text(
+                      'Drag Mochi through the bubbles',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
                   ),
                 ),
-              if (gamePaused && !_over)
-                const Positioned.fill(child: GamePausedOverlay()),
-              if (_over)
-                Positioned.fill(
-                  child: GameResultCard(
-                    emoji: '🫧',
-                    headline: _bestCombo >= 8
-                        ? 'Mochi is extra wiggly!'
-                        : 'Tickle time done',
-                    accent: MochiPalette.lavender,
-                    lines: <String>[
-                      'Popped $_popped bubbles · best combo x$_bestCombo',
-                      _rewardLine(_result),
-                    ],
-                    onReplay: _reset,
-                    onDone: () => Navigator.of(context).pop(),
+                for (final _Bubble bubble in _bubbles)
+                  Positioned(
+                    left: bubble.x,
+                    top: bubble.y,
+                    child: IgnorePointer(
+                      child: _BubbleView(bubble: bubble, elapsed: _elapsed),
+                    ),
+                  ),
+                for (final burst in _bursts)
+                  Positioned(
+                    left: burst.position.dx,
+                    top: burst.position.dy - 12,
+                    child: IgnorePointer(
+                      child: Text(
+                        '✦ x${burst.combo}',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  left: _mochi!.dx - _mochiSize / 2,
+                  top: _mochi!.dy - _mochiSize / 2,
+                  child: IgnorePointer(
+                    child: MochiGameSprite(
+                      size: _mochiSize,
+                      pet: widget.petProvider.pet,
+                      squash: _squash,
+                    ),
                   ),
                 ),
-            ],
+                if (gamePaused && !_over)
+                  Positioned.fill(
+                    child: GamePausedOverlay(onResume: toggleGamePause),
+                  ),
+                if (_over)
+                  Positioned.fill(
+                    child: GameResultCard(
+                      pet: widget.petProvider.pet,
+                      ready: _result != null,
+                      emoji: '🫧',
+                      headline: _bestCombo >= 8
+                          ? 'Mochi is extra wiggly!'
+                          : 'Tickle time done',
+                      accent: MochiPalette.lavender,
+                      lines: <String>[
+                        'Popped $_popped bubbles · best combo x$_bestCombo',
+                        _rewardLine(_result),
+                        if (_result?.foodAwarded != null)
+                          '+1 ${_result!.foodAwarded!.emoji} ${_result!.foodAwarded!.label}',
+                      ],
+                      onReplay: _reset,
+                      onDone: () => Navigator.of(context).pop(),
+                    ),
+                  ),
+              ],
+            ),
           );
         },
       ),
@@ -274,24 +388,22 @@ class _TicklePopGameState extends State<TicklePopGame>
     }
     return switch (result.outcome) {
       MiniGameOutcome.rewarded =>
-        '+${result.xpAwarded} XP · Mochi is delighted${result.foodSuffix}',
-      MiniGameOutcome.dailyCapReached =>
-        'Daily play bonus used up. Still fun though!',
-      MiniGameOutcome.cooldown => 'On cooldown. No XP this time.',
+        '+${result.xpAwarded} XP · Mochi is delighted',
+      MiniGameOutcome.dailyCapReached ||
+      MiniGameOutcome.cooldown => result.xpRestLine,
     };
   }
 }
 
 class _BubbleView extends StatelessWidget {
-  const _BubbleView({required this.bubble});
+  const _BubbleView({required this.bubble, required this.elapsed});
 
   final _Bubble bubble;
+  final double elapsed;
 
   @override
   Widget build(BuildContext context) {
-    final double ageMs =
-        DateTime.now().difference(bubble.bornAt).inMilliseconds.toDouble();
-    final double life = (1 - ageMs / 1400).clamp(0.0, 1.0);
+    final double life = (1 - (elapsed - bubble.bornAt) / 1.4).clamp(0.0, 1.0);
     return Opacity(
       opacity: 0.35 + life * 0.65,
       child: Container(
