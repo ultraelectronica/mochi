@@ -26,7 +26,9 @@ class MochiRepository {
   // ---- Pet --------------------------------------------------------------
 
   Pet? getPet() {
-    final sqlite3.Row? row = _selectOne('SELECT * FROM pets ORDER BY id LIMIT 1');
+    final sqlite3.Row? row = _selectOne(
+      'SELECT * FROM pets ORDER BY id LIMIT 1',
+    );
     return row == null ? null : _petFromRow(row);
   }
 
@@ -46,7 +48,9 @@ class MochiRepository {
   // ---- Profile (single user) --------------------------------------------
 
   Member? getProfile() {
-    final sqlite3.Row? row = _selectOne('SELECT * FROM members ORDER BY id LIMIT 1');
+    final sqlite3.Row? row = _selectOne(
+      'SELECT * FROM members ORDER BY id LIMIT 1',
+    );
     return row == null ? null : _memberFromRow(row);
   }
 
@@ -84,13 +88,10 @@ class MochiRepository {
   void updateProfile({String? bio, DateTime? birthdate}) {
     final String? trimmedBio = _normalizedBio(bio);
     _validateBirthdate(birthdate);
-    _sql.execute(
-      'UPDATE members SET bio = ?, birthdate = ?',
-      <Object?>[
-        trimmedBio,
-        birthdate == null ? null : formatBirthdate(birthdate),
-      ],
-    );
+    _sql.execute('UPDATE members SET bio = ?, birthdate = ?', <Object?>[
+      trimmedBio,
+      birthdate == null ? null : formatBirthdate(birthdate),
+    ]);
   }
 
   String? _normalizedBio(String? bio) {
@@ -116,10 +117,9 @@ class MochiRepository {
   }
 
   void touchProfileSeen(DateTime when) {
-    _sql.execute(
-      'UPDATE members SET last_seen_at = ?',
-      <Object?>[when.toUtc().toIso8601String()],
-    );
+    _sql.execute('UPDATE members SET last_seen_at = ?', <Object?>[
+      when.toUtc().toIso8601String(),
+    ]);
   }
 
   // ---- Chat sessions ------------------------------------------------------
@@ -180,14 +180,12 @@ class MochiRepository {
   }
 
   void deleteSession(int sessionId) {
-    _sql.execute(
-      'DELETE FROM interactions WHERE session_id = ?',
-      <Object?>[sessionId],
-    );
-    _sql.execute(
-      'DELETE FROM chat_sessions WHERE id = ?',
-      <Object?>[sessionId],
-    );
+    _sql.execute('DELETE FROM interactions WHERE session_id = ?', <Object?>[
+      sessionId,
+    ]);
+    _sql.execute('DELETE FROM chat_sessions WHERE id = ?', <Object?>[
+      sessionId,
+    ]);
   }
 
   // ---- Interactions -------------------------------------------------------
@@ -292,9 +290,9 @@ class MochiRepository {
 
   /// Returns true when the pet advanced to one or more new stages.
   bool checkStagePromotion() {
-    final sqlite3.Row row = _sql.select(
-      'SELECT stage, total_xp FROM pets ORDER BY id LIMIT 1',
-    ).single;
+    final sqlite3.Row row = _sql
+        .select('SELECT stage, total_xp FROM pets ORDER BY id LIMIT 1')
+        .single;
     int currentStage = row['stage'] as int;
     final int totalXp = row['total_xp'] as int;
 
@@ -336,13 +334,27 @@ class MochiRepository {
     return row != null;
   }
 
-  /// Logs today's check-in and rolls the daily treat into the pantry.
-  Food? recordMoodCheckIn({required int memberId, required String mood}) {
+  /// Logs the first check-in today and adds its pantry staples.
+  List<Food> recordMoodCheckIn({required int memberId, required String mood}) {
+    if (memberCheckedInToday(memberId)) {
+      return const <Food>[];
+    }
     _sql.execute(
       'INSERT INTO mood_log (member_id, mood, created_at) VALUES (?, ?, ?)',
       <Object?>[memberId, mood, MochiDb.nowIso()],
     );
-    return rollFoodDrop(memberId: memberId, source: FoodSource.checkIn);
+    final List<Food> rewards = <Food>[];
+    for (final Food staple in <Food>[Food.mochiBite, Food.onigiri]) {
+      final Food? food = rollFoodDrop(
+        memberId: memberId,
+        source: FoodSource.checkIn,
+        preferred: staple,
+      );
+      if (food != null) {
+        rewards.add(food);
+      }
+    }
+    return rewards;
   }
 
   String recalculateMood() {
@@ -359,13 +371,17 @@ class MochiRepository {
         .map((sqlite3.Row r) => r['mood'] as String)
         .toList();
 
-    final int recentChats = _sql
-        .select(
-          '''SELECT COUNT(*) AS count FROM interactions
+    final int recentChats =
+        _sql
+                .select(
+                  '''SELECT COUNT(*) AS count FROM interactions
              WHERE created_at >= ?''',
-          <Object?>[now.subtract(const Duration(hours: 1)).toIso8601String()],
-        )
-        .single['count'] as int;
+                  <Object?>[
+                    now.subtract(const Duration(hours: 1)).toIso8601String(),
+                  ],
+                )
+                .single['count']
+            as int;
 
     double score = 70;
     for (final String mood in recentMoods) {
@@ -431,9 +447,7 @@ class MochiRepository {
     if (inactivityHours >= GameConfig.moodDecayHours) {
       return MochiMood.tired;
     }
-    if (recentMoods.take(3).toSet().length >= 3 &&
-        score >= 35 &&
-        score <= 75) {
+    if (recentMoods.take(3).toSet().length >= 3 && score >= 35 && score <= 75) {
       return MochiMood.confused;
     }
     if (score >= 90 || recentChats >= 4) {
@@ -479,7 +493,10 @@ class MochiRepository {
     if (tapCooldownRemainingSeconds(memberId: memberId) > 0) {
       return 0;
     }
-    final int xpAwarded = awardXp(memberId: memberId, amount: GameConfig.xpPerTap);
+    final int xpAwarded = awardXp(
+      memberId: memberId,
+      amount: GameConfig.xpPerTap,
+    );
     _sql.execute(
       'INSERT INTO pet_taps (member_id, xp_awarded, created_at) VALUES (?, ?, ?)',
       <Object?>[memberId, xpAwarded, MochiDb.nowIso()],
@@ -536,13 +553,13 @@ class MochiRepository {
 
   /// One-time starter pantry so a save can feed Mochi on day one.
   void grantStarterPack({required int memberId}) {
-    final int existing = _sql
-        .select(
-          'SELECT COUNT(*) AS count FROM food_grants '
-          'WHERE member_id = ? AND source = ?',
-          <Object?>[memberId, FoodSource.starter.name],
-        )
-        .single['count'] as int;
+    final int existing =
+        _sql.select(
+              'SELECT COUNT(*) AS count FROM food_grants '
+              'WHERE member_id = ? AND source = ?',
+              <Object?>[memberId, FoodSource.starter.name],
+            ).single['count']
+            as int;
     if (existing > 0) {
       return;
     }
@@ -560,12 +577,16 @@ class MochiRepository {
 
   /// Weighted random pantry drop for [source], capped per day. Returns the
   /// granted food, or null when the source cap is hit or the pantry is full.
-  Food? rollFoodDrop({required int memberId, required FoodSource source}) {
+  Food? rollFoodDrop({
+    required int memberId,
+    required FoodSource source,
+    Food? preferred,
+  }) {
     if (_foodGrantsToday(memberId: memberId, source: source) >=
         _dailyFoodCap(source)) {
       return null;
     }
-    final Food? food = _rollFood(memberId: memberId);
+    final Food? food = _rollFood(memberId: memberId, preferred: preferred);
     if (food == null) {
       return null;
     }
@@ -578,18 +599,21 @@ class MochiRepository {
   Food? claimChatFoodDrop({required int memberId}) {
     final String lastDrop =
         _selectOne(
-          'SELECT MAX(created_at) AS last FROM food_grants '
-          'WHERE member_id = ? AND source = ?',
-          <Object?>[memberId, FoodSource.chat.name],
-        )?['last'] as String? ??
+              'SELECT MAX(created_at) AS last FROM food_grants '
+              'WHERE member_id = ? AND source = ?',
+              <Object?>[memberId, FoodSource.chat.name],
+            )?['last']
+            as String? ??
         '';
-    final int rewardedSince = _sql
-        .select(
-          '''SELECT COUNT(*) AS count FROM interactions
+    final int rewardedSince =
+        _sql
+                .select(
+                  '''SELECT COUNT(*) AS count FROM interactions
              WHERE member_id = ? AND xp_awarded > 0 AND created_at > ?''',
-          <Object?>[memberId, lastDrop],
-        )
-        .single['count'] as int;
+                  <Object?>[memberId, lastDrop],
+                )
+                .single['count']
+            as int;
     if (rewardedSince < GameConfig.chatFoodEveryN) {
       return null;
     }
@@ -597,13 +621,12 @@ class MochiRepository {
   }
 
   int _foodGrantsToday({required int memberId, required FoodSource source}) {
-    return _sql
-        .select(
+    return _sql.select(
           'SELECT COUNT(*) AS count FROM food_grants '
           'WHERE member_id = ? AND source = ? AND created_at >= ?',
           <Object?>[memberId, source.name, _dayStartUtc],
-        )
-        .single['count'] as int;
+        ).single['count']
+        as int;
   }
 
   static int _dailyFoodCap(FoodSource source) => switch (source) {
@@ -615,7 +638,7 @@ class MochiRepository {
 
   /// Weighted pick over foods under the pantry cap and unlocked at the
   /// current stage; null when nothing can fit.
-  Food? _rollFood({required int memberId}) {
+  Food? _rollFood({required int memberId, Food? preferred}) {
     final Map<Food, int> counts = foodInventory(memberId: memberId);
     final int stage = petStageNumber(getPet()!.stage);
     final List<Food> pool = <Food>[];
@@ -625,6 +648,9 @@ class MochiRepository {
       }
       if (stage < petStageNumber(food.unlockStage)) {
         continue;
+      }
+      if (food == preferred) {
+        return food;
       }
       for (int i = 0; i < food.dropWeight; i++) {
         pool.add(food);
@@ -671,7 +697,14 @@ class MochiRepository {
       '''INSERT INTO feedings
          (member_id, food, satiety_before, satiety_awarded, xp_awarded, created_at)
          VALUES (?, ?, ?, ?, ?, ?)''',
-      <Object?>[memberId, food.name, satietyBefore, food.satietyGain, xpAwarded, now],
+      <Object?>[
+        memberId,
+        food.name,
+        satietyBefore,
+        food.satietyGain,
+        xpAwarded,
+        now,
+      ],
     );
     _sql.execute(
       '''UPDATE pets
@@ -705,15 +738,22 @@ class MochiRepository {
 
   // ---- Mini-games ---------------------------------------------------------
 
+  int gameFoodRemaining({required int memberId}) => math.max(
+    0,
+    GameConfig.gameFoodDailyCap -
+        _foodGrantsToday(memberId: memberId, source: FoodSource.game),
+  );
+
   /// Scored plays today that actually earned XP (0 XP runs don't count).
   int dailyMiniGamePlays({required int memberId}) {
     return _sql
-        .select(
-          '''SELECT COUNT(*) AS count FROM mini_game_plays
+            .select(
+              '''SELECT COUNT(*) AS count FROM mini_game_plays
              WHERE member_id = ? AND xp_awarded > 0 AND created_at >= ?''',
-          <Object?>[memberId, _dayStartUtc],
-        )
-        .single['count'] as int;
+              <Object?>[memberId, _dayStartUtc],
+            )
+            .single['count']
+        as int;
   }
 
   /// Seconds until the next scored mini-game play (cooldown between rewards).
@@ -754,7 +794,8 @@ class MochiRepository {
 
   /// Records a finished mini-game run and applies rewards unless the member is
   /// on cooldown or out of daily scored plays, in which case the run is still
-  /// logged with 0 XP plus a tiny consolation mood bump.
+  /// logged with 0 XP plus a tiny consolation mood bump. Pantry food has its
+  /// own allowance, including runs that end in a loss.
   MiniGameResult recordMiniGamePlay({
     required int memberId,
     required MiniGame game,
@@ -780,6 +821,7 @@ class MochiRepository {
       return MiniGameResult(
         outcome: MiniGameOutcome.cooldown,
         playsRemaining: playsRemaining,
+        foodAwarded: rollFoodDrop(memberId: memberId, source: FoodSource.game),
       );
     }
     if (playsRemaining <= 0) {
@@ -790,7 +832,10 @@ class MochiRepository {
         xpAwarded: 0,
       );
       _applyConsolationMood();
-      return const MiniGameResult(outcome: MiniGameOutcome.dailyCapReached);
+      return MiniGameResult(
+        outcome: MiniGameOutcome.dailyCapReached,
+        foodAwarded: rollFoodDrop(memberId: memberId, source: FoodSource.game),
+      );
     }
 
     final int baseXp = miniGameXpForScore(
@@ -843,10 +888,7 @@ class MochiRepository {
 
   /// Per-game mechanical side-effects. Returns the new satiety for Snack Catch,
   /// null for games that don't touch satiety.
-  int? _applyMiniGameSideEffects({
-    required MiniGame game,
-    required int score,
-  }) {
+  int? _applyMiniGameSideEffects({required MiniGame game, required int score}) {
     final Pet pet = getPet()!;
     final String now = MochiDb.nowIso();
     switch (game) {
@@ -867,15 +909,13 @@ class MochiRepository {
         );
         return satietyAfter;
       case MiniGame.ticklePop:
-        _sql.execute(
-          '''UPDATE pets
+        _sql.execute('''UPDATE pets
              SET mood_score = MIN(mood_score + 6, 100),
                  mood = CASE
                    WHEN MIN(mood_score + 6, 100) >= 88 THEN 'laughing'
                    WHEN mood IN ('sad', 'angry', 'scared') THEN 'happy'
                    ELSE mood
-                 END''',
-        );
+                 END''');
         return null;
       case MiniGame.moodMatch:
         return null;
@@ -884,9 +924,7 @@ class MochiRepository {
 
   /// Tiny mood bump for a play that couldn't earn XP (cooldown/daily cap).
   void _applyConsolationMood() {
-    _sql.execute(
-      'UPDATE pets SET mood_score = MIN(mood_score + 1, 100)',
-    );
+    _sql.execute('UPDATE pets SET mood_score = MIN(mood_score + 1, 100)');
   }
 
   // ---- Memories -----------------------------------------------------------
@@ -933,10 +971,7 @@ class MochiRepository {
       return;
     }
     values.add(id);
-    _sql.execute(
-      'UPDATE memories SET ${sets.join(', ')} WHERE id = ?',
-      values,
-    );
+    _sql.execute('UPDATE memories SET ${sets.join(', ')} WHERE id = ?', values);
   }
 
   void deleteMemory(int id) {
@@ -971,7 +1006,8 @@ class MochiRepository {
         _sql.select(
               'SELECT COUNT(*) AS count FROM memories WHERE member_id = ?',
               <Object?>[memberId],
-            ).single['count'] as int;
+            ).single['count']
+            as int;
 
     if (count >= GameConfig.maxMemoriesPerMember) {
       _sql.execute(
@@ -990,11 +1026,10 @@ class MochiRepository {
   }
 
   void pruneStaleMemories() {
-    final String cutoff =
-        DateTime.now()
-            .toUtc()
-            .subtract(const Duration(days: GameConfig.memoryPruneDays))
-            .toIso8601String();
+    final String cutoff = DateTime.now()
+        .toUtc()
+        .subtract(const Duration(days: GameConfig.memoryPruneDays))
+        .toIso8601String();
     _sql.execute(
       'DELETE FROM memories WHERE weight <= 2 AND created_at <= ?',
       <Object?>[cutoff],
@@ -1012,7 +1047,10 @@ class MochiRepository {
     final Map<int, MochiMood> map = <int, MochiMood>{};
     for (final sqlite3.Row row in rows) {
       final int memberId = row['member_id'] as int;
-      map.putIfAbsent(memberId, () => mochiMoodFromString(row['mood'] as String));
+      map.putIfAbsent(
+        memberId,
+        () => mochiMoodFromString(row['mood'] as String),
+      );
     }
     return map;
   }
@@ -1020,10 +1058,8 @@ class MochiRepository {
   /// Top-3 memory contents for the prompt block (`ORDER BY weight DESC`).
   List<String> memoriesForPrompt() {
     return _sql
-        .select(
-          '''SELECT content FROM memories
-             ORDER BY weight DESC, created_at DESC LIMIT 3''',
-        )
+        .select('''SELECT content FROM memories
+             ORDER BY weight DESC, created_at DESC LIMIT 3''')
         .map((sqlite3.Row row) => row['content'] as String)
         .toList(growable: false);
   }
@@ -1038,9 +1074,9 @@ class MochiRepository {
       !forceTokenOverlapFallback && _compileFtsAvailable();
 
   bool _compileFtsAvailable() {
-    final sqlite3.Row row = _sql.select(
-      "SELECT sqlite_compileoption_used('ENABLE_FTS5') AS used",
-    ).single;
+    final sqlite3.Row row = _sql
+        .select("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS used")
+        .single;
     return row['used'] == 1;
   }
 
@@ -1112,9 +1148,9 @@ class MochiRepository {
       if (content.isEmpty) {
         continue;
       }
-      final int overlap = terms.where(
-        (String term) => content.toLowerCase().contains(term),
-      ).length;
+      final int overlap = terms
+          .where((String term) => content.toLowerCase().contains(term))
+          .length;
       if (overlap == 0) {
         continue;
       }
@@ -1122,9 +1158,8 @@ class MochiRepository {
       final double recencyBonus = _recencyBonus(row['created_at']);
       scores[content] = overlap * (weight * 10 + recencyBonus);
     }
-    final List<String> sorted =
-        scores.keys.toList(growable: false)
-          ..sort((String a, String b) => scores[b]!.compareTo(scores[a]!));
+    final List<String> sorted = scores.keys.toList(growable: false)
+      ..sort((String a, String b) => scores[b]!.compareTo(scores[a]!));
     return sorted.take(k).toList(growable: false);
   }
 
@@ -1160,8 +1195,9 @@ class MochiRepository {
   static List<String> _ftsTerms(String text) {
     final List<String> terms = <String>[];
     final HashSet<String> seen = HashSet<String>();
-    for (final String token
-        in text.toLowerCase().split(RegExp(r'[^a-z0-9]+'))) {
+    for (final String token in text.toLowerCase().split(
+      RegExp(r'[^a-z0-9]+'),
+    )) {
       if (token.length < 3 || !seen.add(token)) {
         continue;
       }
@@ -1175,8 +1211,7 @@ class MochiRepository {
     if (createdAt == null) {
       return 0;
     }
-    final int ageDays =
-        DateTime.now().toUtc().difference(createdAt).inDays;
+    final int ageDays = DateTime.now().toUtc().difference(createdAt).inDays;
     return (30 - ageDays).clamp(0, 30).toDouble();
   }
 
@@ -1184,15 +1219,14 @@ class MochiRepository {
   List<ActivityEntry> feed({int limit = 30}) {
     final List<Map<String, dynamic>> events = <Map<String, dynamic>>[];
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT interactions.id, interactions.created_at,
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT interactions.id, interactions.created_at,
                     members.id AS member_id, members.name AS member_name
              FROM interactions
              JOIN members ON members.id = interactions.member_id
              ORDER BY interactions.created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       events.add(<String, dynamic>{
         'event_type': 'chat',
         'created_at': row['created_at'],
@@ -1201,15 +1235,14 @@ class MochiRepository {
       });
     }
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT mood_log.id, mood_log.created_at, mood_log.mood,
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT mood_log.id, mood_log.created_at, mood_log.mood,
                     members.id AS member_id, members.name AS member_name
              FROM mood_log
              JOIN members ON members.id = mood_log.member_id
              ORDER BY mood_log.created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       events.add(<String, dynamic>{
         'event_type': 'mood_checkin',
         'created_at': row['created_at'],
@@ -1218,12 +1251,11 @@ class MochiRepository {
       });
     }
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT id, stage, created_at FROM stage_events
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT id, stage, created_at FROM stage_events
              ORDER BY created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       final int stage = row['stage'] as int;
       events.add(<String, dynamic>{
         'event_type': 'stage_up',
@@ -1232,15 +1264,14 @@ class MochiRepository {
       });
     }
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT pet_taps.id, pet_taps.created_at,
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT pet_taps.id, pet_taps.created_at,
                     members.id AS member_id, members.name AS member_name
              FROM pet_taps
              JOIN members ON members.id = pet_taps.member_id
              ORDER BY pet_taps.created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       events.add(<String, dynamic>{
         'event_type': 'pet_tap',
         'created_at': row['created_at'],
@@ -1249,15 +1280,14 @@ class MochiRepository {
       });
     }
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT feedings.id, feedings.created_at, feedings.food,
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT feedings.id, feedings.created_at, feedings.food,
                     members.id AS member_id, members.name AS member_name
              FROM feedings
              JOIN members ON members.id = feedings.member_id
              ORDER BY feedings.created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       final Food food = foodFromString(row['food'] as String);
       events.add(<String, dynamic>{
         'event_type': 'feed',
@@ -1268,17 +1298,16 @@ class MochiRepository {
       });
     }
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT mini_game_plays.id, mini_game_plays.created_at,
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT mini_game_plays.id, mini_game_plays.created_at,
                     mini_game_plays.game, mini_game_plays.score,
                     mini_game_plays.xp_awarded,
                     members.id AS member_id, members.name AS member_name
              FROM mini_game_plays
              JOIN members ON members.id = mini_game_plays.member_id
              ORDER BY mini_game_plays.created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       final MiniGame game = miniGameFromString(row['game'] as String);
       events.add(<String, dynamic>{
         'event_type': 'mini_game',
@@ -1291,17 +1320,16 @@ class MochiRepository {
       });
     }
 
-    for (final sqlite3.Row row
-        in _sql.select(
-          '''SELECT food_grants.id, food_grants.created_at, food_grants.food,
+    for (final sqlite3.Row row in _sql.select(
+      '''SELECT food_grants.id, food_grants.created_at, food_grants.food,
                     food_grants.source,
                     members.id AS member_id, members.name AS member_name
              FROM food_grants
              JOIN members ON members.id = food_grants.member_id
              WHERE food_grants.source != 'starter'
              ORDER BY food_grants.created_at DESC LIMIT ?''',
-          <Object?>[limit],
-        )) {
+      <Object?>[limit],
+    )) {
       final Food food = foodFromString(row['food'] as String);
       events.add(<String, dynamic>{
         'event_type': 'food_grant',
@@ -1357,8 +1385,8 @@ class MochiRepository {
     if (hours <= 0) {
       return _clamp(stored, 0, GameConfig.satietyMax);
     }
-    final int decayed =
-        (stored - hours * GameConfig.satietyDecayPerHour).floor();
+    final int decayed = (stored - hours * GameConfig.satietyDecayPerHour)
+        .floor();
     return _clamp(decayed, 0, GameConfig.satietyMax);
   }
 
@@ -1368,8 +1396,9 @@ class MochiRepository {
       'SELECT score FROM affection WHERE member_id = ?',
       <Object?>[row['id']],
     );
-    final int affectionScore =
-        affection == null ? 0 : affection['score'] as int;
+    final int affectionScore = affection == null
+        ? 0
+        : affection['score'] as int;
     return Member(
       id: row['id'] as int,
       name: (row['name'] as String? ?? 'Family member').trim(),
@@ -1423,7 +1452,10 @@ class MochiRepository {
 
   // ---- Helpers --------------------------------------------------------------
 
-  sqlite3.Row? _selectOne(String sql, [List<Object?> args = const <Object?>[]]) {
+  sqlite3.Row? _selectOne(
+    String sql, [
+    List<Object?> args = const <Object?>[],
+  ]) {
     final sqlite3.ResultSet rows = _sql.select(sql, args);
     if (rows.isEmpty) {
       return null;
