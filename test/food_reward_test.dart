@@ -45,7 +45,7 @@ void main() {
   }
 
   group('chat drops', () {
-    test('grants a treat every fourth rewarded chat', () {
+    test('grants a treat every second rewarded chat', () {
       sendRewardedChats(GameConfig.chatFoodEveryN - 1);
 
       expect(repo.claimChatFoodDrop(memberId: profile.id), isNull);
@@ -56,6 +56,35 @@ void main() {
       final Food? drop = repo.claimChatFoodDrop(memberId: profile.id);
       expect(drop, isNotNull);
       expect(repo.foodInventory(memberId: profile.id)[drop!], 1);
+    });
+
+    test('unrewarded chats do not advance food progress', () {
+      sendRewardedChats(1);
+      for (int i = 0; i < 4; i++) {
+        repo.insertInteraction(
+          memberId: profile.id,
+          sessionId: sessionId,
+          inputText: 'deflected',
+          responseText: 'lets chat about us',
+          inputType: 'text',
+          xpAwarded: 0,
+        );
+      }
+      expect(repo.claimChatFoodDrop(memberId: profile.id), isNull);
+      sendRewardedChats(1);
+      expect(repo.claimChatFoodDrop(memberId: profile.id), isNotNull);
+    });
+
+    test('chat progress carries over the UTC day boundary', () {
+      sendRewardedChats(1);
+      db.db.execute('UPDATE interactions SET created_at = ?', <Object?>[
+        DateTime.now()
+            .toUtc()
+            .subtract(const Duration(days: 1))
+            .toIso8601String(),
+      ]);
+      sendRewardedChats(1);
+      expect(repo.claimChatFoodDrop(memberId: profile.id), isNotNull);
     });
 
     test('stops after the daily chat cap', () {
@@ -76,7 +105,11 @@ void main() {
         if (food == Food.matchaTea) {
           continue;
         }
-        repo.addFood(memberId: profile.id, food: food, amount: 9);
+        repo.addFood(
+          memberId: profile.id,
+          food: food,
+          amount: GameConfig.foodInventoryCap,
+        );
       }
 
       expect(
@@ -87,25 +120,151 @@ void main() {
 
     test('returns null when every unlocked food is capped', () {
       for (final Food food in Food.values) {
-        repo.addFood(memberId: profile.id, food: food, amount: 9);
+        repo.addFood(
+          memberId: profile.id,
+          food: food,
+          amount: GameConfig.foodInventoryCap,
+        );
       }
 
-      expect(repo.rollFoodDrop(memberId: profile.id, source: FoodSource.game), isNull);
+      expect(
+        repo.rollFoodDrop(memberId: profile.id, source: FoodSource.game),
+        isNull,
+      );
     });
   });
 
   group('check-in drop', () {
-    test('grants once per day', () {
+    test('grants both staples once per day with item-level history', () {
+      expect(repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'), <Food>[
+        Food.mochiBite,
+        Food.onigiri,
+      ]);
       expect(
         repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'),
-        isNotNull,
+        isEmpty,
       );
-      expect(repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'), isNull);
       expect(pantryTotal(), GameConfig.checkInFoodDailyCap);
+      expect(db.db.select('SELECT * FROM mood_log'), hasLength(1));
+      expect(
+        db.db.select("SELECT * FROM food_grants WHERE source = 'checkIn'"),
+        hasLength(2),
+      );
+      expect(
+        repo.feed().map((entry) => entry.title),
+        containsAll(<String>[
+          'Sam found ${Food.mochiBite.label}',
+          'Sam found ${Food.onigiri.label}',
+        ]),
+      );
+    });
+
+    test('a capped staple is replaced with an available unlocked food', () {
+      repo.addFood(
+        memberId: profile.id,
+        food: Food.mochiBite,
+        amount: GameConfig.foodInventoryCap,
+      );
+      final List<Food> rewards = repo.recordMoodCheckIn(
+        memberId: profile.id,
+        mood: 'good',
+      );
+      expect(rewards, hasLength(2));
+      expect(rewards, isNot(contains(Food.mochiBite)));
+      expect(rewards.last, Food.onigiri);
+      expect(rewards, isNot(contains(Food.ramen)));
+    });
+
+    test(
+      'a full pantry or egg cannot receive check-in food or retry later',
+      () {
+        db.db.execute('UPDATE pets SET stage = 1');
+        expect(
+          repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'),
+          isEmpty,
+        );
+        db.db.execute('UPDATE pets SET stage = 2');
+        expect(
+          repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'),
+          isEmpty,
+        );
+        expect(pantryTotal(), 0);
+
+        db.db.execute('DELETE FROM mood_log');
+        for (final Food food in Food.values) {
+          repo.addFood(
+            memberId: profile.id,
+            food: food,
+            amount: GameConfig.foodInventoryCap,
+          );
+        }
+        expect(
+          repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'),
+          isEmpty,
+        );
+        db.db.execute('UPDATE food_inventory SET count = 0');
+        expect(
+          repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'),
+          isEmpty,
+        );
+      },
+    );
+
+    test('one free slot grants one item and never exceeds capacity', () {
+      for (final Food food in Food.values) {
+        repo.addFood(
+          memberId: profile.id,
+          food: food,
+          amount: GameConfig.foodInventoryCap,
+        );
+      }
+      db.db.execute(
+        "UPDATE food_inventory SET count = count - 1 WHERE food = 'onigiri'",
+      );
+      expect(repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'), <Food>[
+        Food.onigiri,
+      ]);
+      expect(
+        repo.foodInventory(memberId: profile.id)[Food.onigiri],
+        GameConfig.foodInventoryCap,
+      );
+    });
+
+    test('a new UTC day permits another check-in bundle', () {
+      repo.recordMoodCheckIn(memberId: profile.id, mood: 'good');
+      final String yesterday = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 1))
+          .toIso8601String();
+      db.db.execute('UPDATE mood_log SET created_at = ?', <Object?>[yesterday]);
+      db.db.execute('UPDATE food_grants SET created_at = ?', <Object?>[
+        yesterday,
+      ]);
+      expect(repo.recordMoodCheckIn(memberId: profile.id, mood: 'good'), <Food>[
+        Food.mochiBite,
+        Food.onigiri,
+      ]);
+      expect(pantryTotal(), 4);
     });
   });
 
   group('starter pack', () {
+    test('existing starter packs are not topped up', () {
+      repo.addFood(
+        memberId: profile.id,
+        food: Food.mochiBite,
+        amount: 5,
+        source: FoodSource.starter,
+      );
+      repo.addFood(
+        memberId: profile.id,
+        food: Food.onigiri,
+        amount: 2,
+        source: FoodSource.starter,
+      );
+      repo.grantStarterPack(memberId: profile.id);
+      expect(pantryTotal(), 7);
+    });
     test('grants the first pantry and never grants twice', () {
       repo.grantStarterPack(memberId: profile.id);
 
